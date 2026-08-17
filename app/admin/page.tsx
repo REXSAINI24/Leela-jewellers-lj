@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { Category, Product, ShopSettings } from '@/lib/types'
@@ -21,6 +21,8 @@ const emptyProduct = {
   is_featured: false,
 }
 
+const BUCKET = 'product-images'
+
 export default function AdminPage() {
   const router = useRouter()
   const supabase = createClient()
@@ -30,6 +32,8 @@ export default function AdminPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [product, setProduct] = useState<typeof emptyProduct>(emptyProduct)
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -54,6 +58,20 @@ export default function AdminPage() {
 
   const canSaveProduct = useMemo(() => product.name.trim().length > 0, [product.name])
 
+  function chooseImage(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null
+    setImageFile(file)
+    if (imagePreview) URL.revokeObjectURL(imagePreview)
+    setImagePreview(file ? URL.createObjectURL(file) : '')
+  }
+
+  function resetProduct() {
+    setProduct(emptyProduct)
+    setImageFile(null)
+    if (imagePreview) URL.revokeObjectURL(imagePreview)
+    setImagePreview('')
+  }
+
   async function saveSettings(e: FormEvent) {
     e.preventDefault()
     if (!settings) return
@@ -76,6 +94,7 @@ export default function AdminPage() {
     e.preventDefault()
     if (!canSaveProduct) return
     setBusy(true); setMessage('')
+
     const payload = {
       name: product.name.trim(),
       slug: (product.slug.trim() || slugify(product.name)).trim(),
@@ -90,17 +109,74 @@ export default function AdminPage() {
       is_featured: product.is_featured,
       updated_at: new Date().toISOString(),
     }
+
     const result = product.id
-      ? await supabase.from('products').update(payload).eq('id', product.id)
-      : await supabase.from('products').insert(payload)
-    if (result.error) setMessage(result.error.message)
-    else { setMessage(product.id ? 'Product updated.' : 'Product added.'); setProduct(emptyProduct); await load() }
+      ? await supabase.from('products').update(payload).eq('id', product.id).select('id').single()
+      : await supabase.from('products').insert(payload).select('id').single()
+
+    if (result.error || !result.data) {
+      setMessage(result.error?.message ?? 'Could not save product.')
+      setBusy(false)
+      return
+    }
+
+    const productId = String(result.data.id)
+
+    if (imageFile) {
+      if (!imageFile.type.startsWith('image/')) {
+        setMessage('Please choose an image file.')
+        setBusy(false)
+        return
+      }
+      if (imageFile.size > 8 * 1024 * 1024) {
+        setMessage('Image must be 8 MB or smaller.')
+        setBusy(false)
+        return
+      }
+
+      const safeName = imageFile.name.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
+      const path = `${productId}/${crypto.randomUUID()}-${safeName || 'image.jpg'}`
+      const upload = await supabase.storage.from(BUCKET).upload(path, imageFile, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: imageFile.type,
+      })
+
+      if (upload.error) {
+        setMessage(`Product saved, but image upload failed: ${upload.error.message}`)
+        await load()
+        setBusy(false)
+        return
+      }
+
+      const { data: publicData } = supabase.storage.from(BUCKET).getPublicUrl(path)
+      const imageInsert = await supabase.from('product_images').insert({
+        product_id: productId,
+        storage_path: path,
+        public_url: publicData.publicUrl,
+        sort_order: 0,
+      })
+
+      if (imageInsert.error) {
+        setMessage(`Product saved, but image record failed: ${imageInsert.error.message}`)
+        await load()
+        setBusy(false)
+        return
+      }
+    }
+
+    setMessage(product.id ? 'Product updated successfully.' : 'Product added successfully.')
+    resetProduct()
+    await load()
     setBusy(false)
   }
 
   async function removeProduct(id: string) {
     if (!confirm('Delete this product?')) return
     setBusy(true)
+    const { data: images } = await supabase.from('product_images').select('storage_path').eq('product_id', id)
+    if (images?.length) await supabase.storage.from(BUCKET).remove(images.map(x => x.storage_path))
+    await supabase.from('product_images').delete().eq('product_id', id)
     const { error } = await supabase.from('products').delete().eq('id', id)
     setMessage(error ? error.message : 'Product deleted.')
     await load(); setBusy(false)
@@ -156,9 +232,17 @@ export default function AdminPage() {
             <label className="text-sm font-medium">Purity<input className="mt-1 w-full rounded-md border px-3 py-2" value={product.purity} onChange={e=>setProduct({...product,purity:e.target.value})}/></label>
             <label className="text-sm font-medium">Slug<input className="mt-1 w-full rounded-md border px-3 py-2" value={product.slug} onChange={e=>setProduct({...product,slug:e.target.value})}/></label>
             <label className="text-sm font-medium md:col-span-2">Description<textarea className="mt-1 min-h-24 w-full rounded-md border px-3 py-2" value={product.description} onChange={e=>setProduct({...product,description:e.target.value})}/></label>
+
+            <div className="rounded-xl border border-dashed p-4 md:col-span-2">
+              <label className="text-sm font-medium">Product photo</label>
+              <input className="mt-2 block w-full text-sm" type="file" accept="image/jpeg,image/png,image/webp,image/avif" onChange={chooseImage}/>
+              <p className="mt-1 text-xs text-muted-foreground">Choose one JPG, PNG, WebP or AVIF image up to 8 MB.</p>
+              {imagePreview && <img src={imagePreview} alt="Selected product" className="mt-3 h-32 w-32 rounded-lg border object-cover" />}
+            </div>
+
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={product.is_available} onChange={e=>setProduct({...product,is_available:e.target.checked})}/> Available</label>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={product.is_featured} onChange={e=>setProduct({...product,is_featured:e.target.checked})}/> Featured</label>
-            <div className="flex gap-2 md:col-span-2"><button disabled={busy || !canSaveProduct} className="rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">{product.id ? 'Update product' : 'Add product'}</button>{product.id && <button type="button" onClick={()=>setProduct(emptyProduct)} className="rounded-md border px-4 py-2.5 text-sm">Cancel</button>}</div>
+            <div className="flex gap-2 md:col-span-2"><button disabled={busy || !canSaveProduct} className="rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">{busy ? 'Saving…' : product.id ? 'Update product' : 'Add product'}</button>{product.id && <button type="button" onClick={resetProduct} className="rounded-md border px-4 py-2.5 text-sm">Cancel</button>}</div>
           </form>
         </section>
 
