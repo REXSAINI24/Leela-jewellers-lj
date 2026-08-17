@@ -1,0 +1,175 @@
+'use client'
+
+import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
+import type { Category, Product, ShopSettings } from '@/lib/types'
+import { slugify } from '@/lib/format'
+
+const emptyProduct = {
+  id: '',
+  name: '',
+  slug: '',
+  sku: '',
+  category_id: '',
+  rate: '',
+  weight: '',
+  price: '',
+  purity: '',
+  description: '',
+  is_available: true,
+  is_featured: false,
+}
+
+export default function AdminPage() {
+  const router = useRouter()
+  const supabase = createClient()
+  const [ready, setReady] = useState(false)
+  const [authorized, setAuthorized] = useState(false)
+  const [settings, setSettings] = useState<ShopSettings | null>(null)
+  const [categories, setCategories] = useState<Category[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+  const [product, setProduct] = useState<typeof emptyProduct>(emptyProduct)
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function load() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { router.replace('/admin/login'); return }
+    const { data: admin } = await supabase.from('admin_users').select('user_id').eq('user_id', user.id).maybeSingle()
+    if (!admin) { await supabase.auth.signOut(); router.replace('/admin/login'); return }
+    const [s, c, p] = await Promise.all([
+      supabase.from('shop_settings').select('*').eq('id', 1).maybeSingle(),
+      supabase.from('categories').select('*').order('sort_order', { ascending: true }),
+      supabase.from('products').select('*').order('created_at', { ascending: false }),
+    ])
+    setSettings(s.data as ShopSettings | null)
+    setCategories((c.data as Category[]) ?? [])
+    setProducts((p.data as Product[]) ?? [])
+    setAuthorized(true)
+    setReady(true)
+  }
+
+  useEffect(() => { load() }, [])
+
+  const canSaveProduct = useMemo(() => product.name.trim().length > 0, [product.name])
+
+  async function saveSettings(e: FormEvent) {
+    e.preventDefault()
+    if (!settings) return
+    setBusy(true); setMessage('')
+    const { error } = await supabase.from('shop_settings').update({
+      shop_name: settings.shop_name,
+      address: settings.address,
+      phone: settings.phone,
+      whatsapp_number: settings.whatsapp_number,
+      google_maps_url: settings.google_maps_url,
+      about: settings.about,
+      updated_at: new Date().toISOString(),
+    }).eq('id', 1)
+    setMessage(error ? error.message : 'Shop details saved.')
+    setBusy(false)
+    router.refresh()
+  }
+
+  async function saveProduct(e: FormEvent) {
+    e.preventDefault()
+    if (!canSaveProduct) return
+    setBusy(true); setMessage('')
+    const payload = {
+      name: product.name.trim(),
+      slug: (product.slug.trim() || slugify(product.name)).trim(),
+      sku: product.sku.trim() || null,
+      category_id: product.category_id || null,
+      rate: product.rate.trim() || null,
+      weight: product.weight.trim() || null,
+      price: product.price === '' ? null : Number(product.price),
+      purity: product.purity.trim() || null,
+      description: product.description.trim() || null,
+      is_available: product.is_available,
+      is_featured: product.is_featured,
+      updated_at: new Date().toISOString(),
+    }
+    const result = product.id
+      ? await supabase.from('products').update(payload).eq('id', product.id)
+      : await supabase.from('products').insert(payload)
+    if (result.error) setMessage(result.error.message)
+    else { setMessage(product.id ? 'Product updated.' : 'Product added.'); setProduct(emptyProduct); await load() }
+    setBusy(false)
+  }
+
+  async function removeProduct(id: string) {
+    if (!confirm('Delete this product?')) return
+    setBusy(true)
+    const { error } = await supabase.from('products').delete().eq('id', id)
+    setMessage(error ? error.message : 'Product deleted.')
+    await load(); setBusy(false)
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut()
+    router.replace('/admin/login')
+    router.refresh()
+  }
+
+  if (!ready) return <main className="min-h-svh p-8 text-center">Loading owner dashboard…</main>
+  if (!authorized) return null
+
+  return (
+    <main className="min-h-svh bg-secondary/30 px-4 py-6 md:px-8">
+      <div className="mx-auto max-w-6xl">
+        <header className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-background p-5">
+          <div><p className="text-xs uppercase tracking-[0.25em] text-gold">LEELA JEWELLERS</p><h1 className="font-serif text-3xl font-semibold text-primary">Owner Dashboard</h1></div>
+          <div className="flex gap-2"><button onClick={()=>router.push('/')} className="rounded-md border px-4 py-2 text-sm">View website</button><button onClick={signOut} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">Logout</button></div>
+        </header>
+
+        {message && <div className="mb-4 rounded-md border bg-background px-4 py-3 text-sm">{message}</div>}
+
+        <section className="mb-6 rounded-2xl border border-border bg-background p-5">
+          <h2 className="font-serif text-2xl font-semibold text-primary">Shop Details</h2>
+          <form onSubmit={saveSettings} className="mt-4 grid gap-4 md:grid-cols-2">
+            {settings && <>
+              {([
+                ['shop_name','Shop name'],['phone','Mobile number'],['whatsapp_number','WhatsApp number'],['address','Address'],['google_maps_url','Google Maps URL']
+              ] as const).map(([key,label]) => (
+                <label key={key} className="text-sm font-medium">{label}
+                  <input className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" value={(settings as any)[key] ?? ''} onChange={e=>setSettings({...settings,[key]:e.target.value})}/>
+                </label>
+              ))}
+              <label className="text-sm font-medium md:col-span-2">About
+                <textarea className="mt-1 min-h-24 w-full rounded-md border border-border bg-background px-3 py-2" value={settings.about ?? ''} onChange={e=>setSettings({...settings,about:e.target.value})}/>
+              </label>
+            </>}
+            <button disabled={busy} className="rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground md:w-fit">Save shop details</button>
+          </form>
+        </section>
+
+        <section className="mb-6 rounded-2xl border border-border bg-background p-5">
+          <h2 className="font-serif text-2xl font-semibold text-primary">{product.id ? 'Edit Product' : 'Add Product'}</h2>
+          <form onSubmit={saveProduct} className="mt-4 grid gap-4 md:grid-cols-2">
+            <label className="text-sm font-medium">Product name<input required className="mt-1 w-full rounded-md border px-3 py-2" value={product.name} onChange={e=>setProduct({...product,name:e.target.value})}/></label>
+            <label className="text-sm font-medium">SKU<input className="mt-1 w-full rounded-md border px-3 py-2" value={product.sku} onChange={e=>setProduct({...product,sku:e.target.value})}/></label>
+            <label className="text-sm font-medium">Category<select className="mt-1 w-full rounded-md border px-3 py-2" value={product.category_id} onChange={e=>setProduct({...product,category_id:e.target.value})}><option value="">Select category</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+            <label className="text-sm font-medium">Price (₹)<input type="number" min="0" className="mt-1 w-full rounded-md border px-3 py-2" value={product.price} onChange={e=>setProduct({...product,price:e.target.value})}/></label>
+            <label className="text-sm font-medium">Rate<input className="mt-1 w-full rounded-md border px-3 py-2" value={product.rate} onChange={e=>setProduct({...product,rate:e.target.value})}/></label>
+            <label className="text-sm font-medium">Weight<input className="mt-1 w-full rounded-md border px-3 py-2" value={product.weight} onChange={e=>setProduct({...product,weight:e.target.value})}/></label>
+            <label className="text-sm font-medium">Purity<input className="mt-1 w-full rounded-md border px-3 py-2" value={product.purity} onChange={e=>setProduct({...product,purity:e.target.value})}/></label>
+            <label className="text-sm font-medium">Slug<input className="mt-1 w-full rounded-md border px-3 py-2" value={product.slug} onChange={e=>setProduct({...product,slug:e.target.value})}/></label>
+            <label className="text-sm font-medium md:col-span-2">Description<textarea className="mt-1 min-h-24 w-full rounded-md border px-3 py-2" value={product.description} onChange={e=>setProduct({...product,description:e.target.value})}/></label>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={product.is_available} onChange={e=>setProduct({...product,is_available:e.target.checked})}/> Available</label>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={product.is_featured} onChange={e=>setProduct({...product,is_featured:e.target.checked})}/> Featured</label>
+            <div className="flex gap-2 md:col-span-2"><button disabled={busy || !canSaveProduct} className="rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">{product.id ? 'Update product' : 'Add product'}</button>{product.id && <button type="button" onClick={()=>setProduct(emptyProduct)} className="rounded-md border px-4 py-2.5 text-sm">Cancel</button>}</div>
+          </form>
+        </section>
+
+        <section className="rounded-2xl border border-border bg-background p-5">
+          <h2 className="font-serif text-2xl font-semibold text-primary">Products</h2>
+          <div className="mt-4 space-y-3">
+            {products.length === 0 && <p className="text-sm text-muted-foreground">No products yet.</p>}
+            {products.map(p => <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"><div><p className="font-medium">{p.name}</p><p className="text-xs text-muted-foreground">{p.sku || 'No SKU'} · {p.price ? `₹${p.price}` : 'Price on request'}</p></div><div className="flex gap-2"><button onClick={()=>setProduct({...p,id:String(p.id),sku:p.sku??'',category_id:p.category_id??'',rate:p.rate??'',weight:p.weight??'',price:p.price==null?'':String(p.price),purity:p.purity??'',description:p.description??'',is_available:p.is_available,is_featured:p.is_featured})} className="rounded-md border px-3 py-1.5 text-sm">Edit</button><button onClick={()=>removeProduct(String(p.id))} className="rounded-md border px-3 py-1.5 text-sm">Delete</button></div></div>)}
+          </div>
+        </section>
+      </div>
+    </main>
+  )
+}
