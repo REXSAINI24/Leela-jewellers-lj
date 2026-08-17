@@ -36,6 +36,9 @@ export default function AdminPage() {
   const [imagePreview, setImagePreview] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const [newCategory, setNewCategory] = useState('')
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
+  const [editingCategoryName, setEditingCategoryName] = useState('')
 
   async function load() {
     const { data: { user } } = await supabase.auth.getUser()
@@ -182,6 +185,37 @@ export default function AdminPage() {
     await load(); setBusy(false)
   }
 
+
+  async function addCategory() {
+    const name = newCategory.trim()
+    if (!name) return
+    setBusy(true); setMessage('')
+    const slug = slugify(name)
+    const sort_order = categories.length ? Math.max(...categories.map(c => c.sort_order)) + 1 : 1
+    const { error } = await supabase.from('categories').insert({ name, slug, sort_order })
+    setMessage(error ? error.message : 'Category added successfully.')
+    if (!error) setNewCategory('')
+    await load(); setBusy(false)
+  }
+
+  async function updateCategory(id: string) {
+    const name = editingCategoryName.trim()
+    if (!name) return
+    setBusy(true); setMessage('')
+    const { error } = await supabase.from('categories').update({ name, slug: slugify(name) }).eq('id', id)
+    setMessage(error ? error.message : 'Category updated successfully.')
+    if (!error) { setEditingCategoryId(null); setEditingCategoryName('') }
+    await load(); setBusy(false)
+  }
+
+  async function removeCategory(id: string) {
+    if (!confirm('Delete this category? Products already using it may prevent deletion.')) return
+    setBusy(true); setMessage('')
+    const { error } = await supabase.from('categories').delete().eq('id', id)
+    setMessage(error ? `Could not delete category: ${error.message}` : 'Category deleted.')
+    await load(); setBusy(false)
+  }
+
   async function signOut() {
     await supabase.auth.signOut()
     router.replace('/admin/login')
@@ -218,6 +252,26 @@ export default function AdminPage() {
             </>}
             <button disabled={busy} className="rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground md:w-fit">Save shop details</button>
           </form>
+        </section>
+
+
+        <section className="mb-6 rounded-2xl border border-border bg-background p-5">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div><p className="text-xs uppercase tracking-[0.2em] text-gold">Catalogue</p><h2 className="font-serif text-2xl font-semibold text-primary">Categories</h2></div>
+            <div className="flex w-full gap-2 sm:w-auto">
+              <input className="min-w-0 flex-1 rounded-md border px-3 py-2 text-sm sm:w-64" placeholder="New category name" value={newCategory} onChange={e=>setNewCategory(e.target.value)} />
+              <button type="button" disabled={busy || !newCategory.trim()} onClick={addCategory} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">Add</button>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {categories.map(c => <div key={c.id} className="flex items-center justify-between gap-2 rounded-lg border p-3">
+              {editingCategoryId === c.id ? <div className="flex min-w-0 flex-1 gap-2"><input className="min-w-0 flex-1 rounded-md border px-2 py-1 text-sm" value={editingCategoryName} onChange={e=>setEditingCategoryName(e.target.value)} /><button type="button" disabled={busy} onClick={()=>updateCategory(c.id)} className="rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground">Save</button></div> : <>
+                <span className="truncate text-sm font-medium">{c.name}</span>
+                <div className="flex shrink-0 gap-1"><button type="button" disabled={busy} onClick={()=>{setEditingCategoryId(c.id);setEditingCategoryName(c.name)}} className="rounded-md border px-2 py-1 text-xs">Edit</button><button type="button" disabled={busy} onClick={()=>removeCategory(c.id)} className="rounded-md border px-2 py-1 text-xs">Delete</button></div>
+              </>}
+            </div>)}
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">You can add more categories anytime. Categories used by existing products may need those products reassigned before deletion.</p>
         </section>
 
         <section className="mb-6 rounded-2xl border border-border bg-background p-5">
