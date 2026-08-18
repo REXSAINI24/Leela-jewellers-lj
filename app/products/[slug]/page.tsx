@@ -17,7 +17,56 @@ type PageProps = {
   params: Promise<{ slug: string }>
 }
 
-type StoneCharge = {
+type StoneRow = {
+  id: string
+  stone_name: string
+  size: string
+  quality: string
+  pcs: string | number
+  price_per_pc: string | number
+  weight: string | number
+}
+
+type OtherRow = {
+  id: string
+  charge_type: string
+  description: string
+  quantity: string | number
+  price_per_unit: string | number
+}
+
+type PricingDetails = {
+  gross_weight?: string | number
+  stone_weight?: string | number
+  net_weight?: string | number
+
+  wastage_value?: string | number
+  wastage_type?: 'percent' | 'fixed' | string
+  wastage_basis?: 'metal_value' | 'net_weight' | 'gross_weight' | string
+
+  making_value?: string | number
+  making_type?: 'per_gram' | 'percent' | 'fixed' | string
+  making_basis?: 'net_weight' | 'gross_weight' | string
+
+  gst_percent?: string | number
+
+  stones?: StoneRow[]
+  other_charges?: OtherRow[]
+
+  calculated?: {
+    applicable_rate?: number
+    metal_value?: number
+    wastage?: number
+    making?: number
+    stone_total?: number
+    other_total?: number
+    subtotal?: number
+    gst?: number
+    estimated_total?: number
+  }
+}
+
+type LegacyStoneCharge = {
   id: string
   stone_name: string | null
   size: string | null
@@ -27,7 +76,7 @@ type StoneCharge = {
   weight: number | null
 }
 
-type OtherCharge = {
+type LegacyOtherCharge = {
   id: string
   charge_type: string | null
   description: string | null
@@ -47,7 +96,15 @@ async function getMetalRates() {
   return data
 }
 
-async function getProductCharges(productId: string) {
+/*
+ * OLD PRODUCTS SUPPORT
+ *
+ * Agar kisi purane product me pricing_details nahi hai,
+ * to hum purani Supabase tables se charges read kar lenge.
+ *
+ * New products ke liye main calculation pricing_details se hogi.
+ */
+async function getLegacyProductCharges(productId: string) {
   const supabase = await createClient()
 
   const [stoneResult, otherResult] = await Promise.all([
@@ -67,13 +124,19 @@ async function getProductCharges(productId: string) {
   ])
 
   return {
-    stones: (stoneResult.data ?? []) as StoneCharge[],
-    others: (otherResult.data ?? []) as OtherCharge[],
+    stones: (stoneResult.data ?? []) as LegacyStoneCharge[],
+    others: (otherResult.data ?? []) as LegacyOtherCharge[],
   }
+}
+
+function num(value: string | number | null | undefined) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
 }
 
 function money(value: number) {
   return `₹${Number(value || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`
 }
@@ -96,7 +159,9 @@ export async function generateMetadata({
   }
 }
 
-export default async function ProductDetailPage({ params }: PageProps) {
+export default async function ProductDetailPage({
+  params,
+}: PageProps) {
   const { slug } = await params
 
   const [settings, categories, product, rates] = await Promise.all([
@@ -108,10 +173,11 @@ export default async function ProductDetailPage({ params }: PageProps) {
 
   if (!product) notFound()
 
-  const charges = await getProductCharges(String(product.id))
-
-  const image = product.product_images?.[0]
-
+  /*
+   * PRODUCT DATA
+   *
+   * pricing_details Admin Panel me save hota hai.
+   */
   const productData = product as typeof product & {
     gross_weight?: number | string | null
     stone_weight?: number | string | null
@@ -126,139 +192,283 @@ export default async function ProductDetailPage({ params }: PageProps) {
     making_basis?: string | null
 
     gst_percent?: number | string | null
+
+    pricing_details?: PricingDetails | null
   }
 
-  const grossWeight = Number(productData.gross_weight || 0)
+  const savedPricing = productData.pricing_details
 
-  const stoneWeightFromProduct = Number(
-    productData.stone_weight || 0
-  )
+  /*
+   * OLD PRODUCT CHARGES
+   *
+   * Sirf tab use honge jab pricing_details available
+   * nahi ho ya usme rows save na hui ho.
+   */
+  const legacyCharges =
+    savedPricing
+      ? { stones: [], others: [] }
+      : await getLegacyProductCharges(String(product.id))
 
-  const stoneWeightFromRows = charges.stones.reduce(
-    (sum, stone) => sum + Number(stone.weight || 0),
+  const image = product.product_images?.[0]
+
+  /*
+   * ============================================================
+   * WEIGHT
+   * ============================================================
+   */
+
+  const grossWeight = savedPricing
+    ? num(savedPricing.gross_weight)
+    : num(productData.gross_weight || product.weight)
+
+  const savedStoneRows = Array.isArray(savedPricing?.stones)
+    ? savedPricing.stones
+    : []
+
+  const savedOtherRows = Array.isArray(savedPricing?.other_charges)
+    ? savedPricing.other_charges
+    : []
+
+  const stoneWeightFromRows = savedStoneRows.reduce(
+    (sum, stone) => sum + num(stone.weight),
     0
   )
+
+  const manualStoneWeight = savedPricing
+    ? num(savedPricing.stone_weight)
+    : num(productData.stone_weight)
 
   const totalStoneWeight =
-    stoneWeightFromProduct || stoneWeightFromRows
+    savedStoneRows.length > 0
+      ? stoneWeightFromRows
+      : manualStoneWeight
+
+  const savedNetWeight = savedPricing
+    ? num(savedPricing.net_weight)
+    : num(productData.net_weight)
 
   const netMetalWeight =
-    Number(productData.net_weight || 0) ||
-    Math.max(grossWeight - totalStoneWeight, 0)
+    savedNetWeight > 0
+      ? savedNetWeight
+      : Math.max(grossWeight - totalStoneWeight, 0)
+
+  /*
+   * ============================================================
+   * CATEGORY / PURITY / METAL RATE
+   * ============================================================
+   */
+
+  const categoryName =
+    product.categories?.name?.toLowerCase() ?? ''
 
   const isGold =
-    product.categories?.name?.toLowerCase().includes('gold')
+    categoryName.includes('gold')
 
   const isSilver =
-    product.categories?.name?.toLowerCase().includes('silver')
+    categoryName.includes('silver')
 
-  const purity = product.purity?.toLowerCase() || ''
+  const purity =
+    product.purity?.toLowerCase() ?? ''
 
-  const currentRate = isSilver
-    ? Number(rates?.silver || 0)
-    : purity.includes('24')
-      ? Number(rates?.gold_24k || 0)
-      : purity.includes('22')
-        ? Number(rates?.gold_22k || 0)
-        : isGold
-          ? Number(rates?.gold_22k || 0)
-          : 0
+  const currentRate =
+    isSilver
+      ? num(rates?.silver)
+      : purity.includes('24')
+        ? num(rates?.gold_24k)
+        : purity.includes('22')
+          ? num(rates?.gold_22k)
+          : isGold
+            ? num(rates?.gold_22k)
+            : num(product.rate)
 
   /*
+   * ============================================================
    * METAL VALUE
-   * Net metal weight × today's metal rate
+   * ============================================================
    */
-  const metalValue = netMetalWeight * currentRate
+
+  const metalValue =
+    netMetalWeight * currentRate
 
   /*
+   * ============================================================
    * MAKING CHARGES
    *
-   * Default:
-   * per gram × net weight
-   *
-   * If type is percent:
-   * percentage × selected basis
+   * EXACT SAME LOGIC AS ADMIN PANEL
+   * ============================================================
    */
-  const makingValue = Number(productData.making_value || 0)
-  const makingType = productData.making_type || 'per_gram'
-  const makingBasis = productData.making_basis || 'net_weight'
 
-  const makingBasisValue =
-    makingBasis === 'metal_value'
-      ? metalValue
-      : grossWeight
+  const makingValue = savedPricing
+    ? num(savedPricing.making_value)
+    : num(productData.making_value)
 
-  const makingCharges =
-    makingType === 'percent'
-      ? (makingValue / 100) * makingBasisValue
-      : makingValue * (
-          makingBasis === 'gross_weight'
-            ? grossWeight
-            : netMetalWeight
-        )
+  const makingType = savedPricing?.making_type
+    ?? productData.making_type
+    ?? 'per_gram'
+
+  const makingBasis = savedPricing?.making_basis
+    ?? productData.making_basis
+    ?? 'net_weight'
+
+  let makingCharges = 0
+
+  if (makingValue > 0) {
+    if (makingType === 'fixed') {
+      makingCharges = makingValue
+    } else if (makingType === 'percent') {
+      /*
+       * Admin:
+       * percent = metalValue × percentage
+       */
+      makingCharges =
+        metalValue * makingValue / 100
+    } else {
+      /*
+       * Admin:
+       * per gram × selected weight basis
+       */
+      const basisWeight =
+        makingBasis === 'gross_weight'
+          ? grossWeight
+          : netMetalWeight
+
+      makingCharges =
+        basisWeight * makingValue
+    }
+  }
 
   /*
+   * ============================================================
    * WASTAGE / VA
+   *
+   * EXACT SAME LOGIC AS ADMIN PANEL
+   * ============================================================
    */
-  const wastageValue = Number(productData.wastage_value || 0)
-  const wastageType = productData.wastage_type || 'percent'
-  const wastageBasis = productData.wastage_basis || 'metal_value'
 
-  const wastageBasisValue =
-    wastageBasis === 'net_weight'
-      ? netMetalWeight
-      : metalValue
+  const wastageValue = savedPricing
+    ? num(savedPricing.wastage_value)
+    : num(productData.wastage_value)
 
-  const wastageCharges =
-    wastageType === 'percent'
-      ? (wastageValue / 100) * wastageBasisValue
-      : wastageValue * netMetalWeight
+  const wastageType = savedPricing?.wastage_type
+    ?? productData.wastage_type
+    ?? 'percent'
+
+  const wastageBasis = savedPricing?.wastage_basis
+    ?? productData.wastage_basis
+    ?? 'metal_value'
+
+  let wastageCharges = 0
+
+  if (wastageValue > 0) {
+    if (wastageType === 'fixed') {
+      /*
+       * Admin Panel me fixed wastage direct amount hai.
+       */
+      wastageCharges = wastageValue
+    } else {
+      let basis = metalValue
+
+      if (wastageBasis === 'net_weight') {
+        basis = netMetalWeight
+      }
+
+      if (wastageBasis === 'gross_weight') {
+        basis = grossWeight
+      }
+
+      wastageCharges =
+        basis * wastageValue / 100
+    }
+  }
 
   /*
+   * ============================================================
    * STONE CHARGES
-   * Every row = PCS × price per PC
+   * ============================================================
    */
-  const stoneCharges = charges.stones.reduce(
+
+  const stoneRows =
+    savedStoneRows.length > 0
+      ? savedStoneRows
+      : legacyCharges.stones.map(stone => ({
+          id: stone.id,
+          stone_name: stone.stone_name ?? '',
+          size: stone.size ?? '',
+          quality: stone.quality ?? '',
+          pcs: stone.pcs ?? 0,
+          price_per_pc: stone.price_per_pc ?? 0,
+          weight: stone.weight ?? 0,
+        }))
+
+  const stoneCharges = stoneRows.reduce(
     (sum, stone) =>
       sum +
-      Number(stone.pcs || 0) *
-        Number(stone.price_per_pc || 0),
+      num(stone.pcs) *
+        num(stone.price_per_pc),
     0
   )
 
   /*
+   * ============================================================
    * OTHER CHARGES
-   * Every row = quantity × price per unit
+   * ============================================================
    */
-  const otherCharges = charges.others.reduce(
+
+  const otherRows =
+    savedOtherRows.length > 0
+      ? savedOtherRows
+      : legacyCharges.others.map(charge => ({
+          id: charge.id,
+          charge_type: charge.charge_type ?? 'Other',
+          description: charge.description ?? '',
+          quantity: charge.quantity ?? 0,
+          price_per_unit: charge.price_per_unit ?? 0,
+        }))
+
+  const otherCharges = otherRows.reduce(
     (sum, charge) =>
       sum +
-      Number(charge.quantity || 0) *
-        Number(charge.price_per_unit || 0),
+      num(charge.quantity) *
+        num(charge.price_per_unit),
     0
   )
+
+  /*
+   * ============================================================
+   * FINAL CALCULATION
+   * ============================================================
+   */
 
   const subtotal =
     metalValue +
-    makingCharges +
     wastageCharges +
+    makingCharges +
     stoneCharges +
     otherCharges
 
-  const gstPercent = Number(productData.gst_percent ?? 3)
+  const gstPercent = savedPricing
+    ? num(savedPricing.gst_percent)
+    : num(productData.gst_percent ?? 3)
 
-  const gst = (subtotal * gstPercent) / 100
+  const finalGstPercent =
+    gstPercent > 0 ? gstPercent : 3
 
-  const estimatedTotal = subtotal + gst
+  const gst =
+    subtotal * finalGstPercent / 100
+
+  const estimatedTotal =
+    subtotal + gst
 
   return (
     <div className="flex min-h-svh flex-col">
+
       <SiteHeader
         shopName={settings.shop_name}
         categories={categories}
       />
 
       <main className="flex-1">
+
         <div className="mx-auto max-w-6xl px-4 py-6 md:px-6">
 
           <Link
@@ -271,8 +481,12 @@ export default async function ProductDetailPage({ params }: PageProps) {
 
           <div className="mt-6 grid gap-8 md:grid-cols-2 md:gap-12">
 
-            {/* PRODUCT IMAGE */}
+            {/* ==================================================
+                PRODUCT IMAGE
+            ================================================== */}
+
             <div className="relative aspect-square overflow-hidden rounded-2xl border border-border/70 bg-secondary">
+
               {image?.public_url ? (
                 <Image
                   src={image.public_url}
@@ -287,9 +501,13 @@ export default async function ProductDetailPage({ params }: PageProps) {
                   <Gem className="size-16" />
                 </div>
               )}
+
             </div>
 
-            {/* PRODUCT DETAILS */}
+            {/* ==================================================
+                PRODUCT DETAILS
+            ================================================== */}
+
             <div className="flex flex-col">
 
               {product.categories && (
@@ -302,8 +520,12 @@ export default async function ProductDetailPage({ params }: PageProps) {
                 {product.name}
               </h1>
 
-              {/* WEIGHT DETAILS */}
+              {/* ==================================================
+                  WEIGHT DETAILS
+              ================================================== */}
+
               <div className="mt-6">
+
                 <h2 className="font-serif text-xl font-semibold text-primary">
                   Weight Details
                 </h2>
@@ -314,6 +536,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
                     <p className="text-xs uppercase tracking-widest text-muted-foreground">
                       Gross Weight
                     </p>
+
                     <p className="mt-1 font-medium">
                       {grossWeight.toFixed(3)} GM
                     </p>
@@ -323,6 +546,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
                     <p className="text-xs uppercase tracking-widest text-muted-foreground">
                       Stone Weight
                     </p>
+
                     <p className="mt-1 font-medium">
                       {totalStoneWeight.toFixed(3)} GM
                     </p>
@@ -332,6 +556,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
                     <p className="text-xs uppercase tracking-widest text-muted-foreground">
                       Net Metal Weight
                     </p>
+
                     <p className="mt-1 font-medium">
                       {netMetalWeight.toFixed(3)} GM
                     </p>
@@ -342,6 +567,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
                       <p className="text-xs uppercase tracking-widest text-muted-foreground">
                         Purity
                       </p>
+
                       <p className="mt-1 font-medium">
                         {product.purity}
                       </p>
@@ -351,7 +577,10 @@ export default async function ProductDetailPage({ params }: PageProps) {
                 </div>
               </div>
 
-              {/* PRICE CALCULATION */}
+              {/* ==================================================
+                  PRICE CALCULATION
+              ================================================== */}
+
               <div className="mt-6 rounded-2xl border border-border/70 bg-secondary/30 p-5">
 
                 <h2 className="font-serif text-2xl font-semibold text-primary">
@@ -365,6 +594,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
                       ? 'Silver'
                       : product.purity || 'Gold'}{' '}
                     rate:{' '}
+
                     <span className="font-medium text-foreground">
                       {money(currentRate)}/gram
                     </span>
@@ -373,62 +603,92 @@ export default async function ProductDetailPage({ params }: PageProps) {
 
                 <div className="mt-5 space-y-3 text-sm">
 
+                  {/* NET WEIGHT */}
+
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">
                       Net Metal Weight
                     </span>
+
                     <span className="font-medium">
                       {netMetalWeight.toFixed(3)} GM
                     </span>
                   </div>
 
+                  {/* METAL RATE */}
+
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">
+                      Applicable Metal Rate
+                    </span>
+
+                    <span className="font-medium">
+                      {money(currentRate)} / GM
+                    </span>
+                  </div>
+
+                  {/* METAL VALUE */}
+
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">
                       Metal Value
                     </span>
+
                     <span className="font-medium">
                       {money(metalValue)}
                     </span>
                   </div>
 
-                  {makingCharges > 0 && (
-                    <div className="flex justify-between gap-4">
-                      <span className="text-muted-foreground">
-                        Making Charges
-                      </span>
-                      <span className="font-medium">
-                        {money(makingCharges)}
-                      </span>
-                    </div>
-                  )}
+                  {/* WASTAGE */}
 
                   {wastageCharges > 0 && (
                     <div className="flex justify-between gap-4">
                       <span className="text-muted-foreground">
                         Wastage / VA
                       </span>
+
                       <span className="font-medium">
                         {money(wastageCharges)}
                       </span>
                     </div>
                   )}
 
+                  {/* MAKING */}
+
+                  {makingCharges > 0 && (
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">
+                        Making Charges
+                      </span>
+
+                      <span className="font-medium">
+                        {money(makingCharges)}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* STONE */}
+
                   {stoneCharges > 0 && (
                     <div className="flex justify-between gap-4">
                       <span className="text-muted-foreground">
                         Stone Charges
                       </span>
+
                       <span className="font-medium">
                         {money(stoneCharges)}
                       </span>
                     </div>
                   )}
 
+                  {/* OTHER */}
+
                   {otherCharges > 0 && (
                     <div className="flex justify-between gap-4">
                       <span className="text-muted-foreground">
                         Other Charges
                       </span>
+
                       <span className="font-medium">
                         {money(otherCharges)}
                       </span>
@@ -437,25 +697,36 @@ export default async function ProductDetailPage({ params }: PageProps) {
 
                   <div className="my-2 border-t border-border/70" />
 
+                  {/* SUBTOTAL */}
+
                   <div className="flex justify-between gap-4">
                     <span className="font-medium">
                       Subtotal
                     </span>
+
                     <span className="font-medium">
                       {money(subtotal)}
                     </span>
                   </div>
 
+                  {/* GST */}
+
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">
-                      GST ({gstPercent}%)
+                      GST ({finalGstPercent}%)
                     </span>
+
                     <span className="font-medium">
                       {money(gst)}
                     </span>
                   </div>
 
-                  <div className="mt-3 flex items-center justify-between gap-4 rounded-xl bg-primary p-4 text-primary-foreground">
+                  <div className="my-2 border-t border-border/70" />
+
+                  {/* FINAL TOTAL */}
+
+                  <div className="flex items-center justify-between gap-4 rounded-xl bg-primary p-4 text-primary-foreground">
+
                     <span className="font-medium">
                       Estimated Total
                     </span>
@@ -463,33 +734,41 @@ export default async function ProductDetailPage({ params }: PageProps) {
                     <span className="font-serif text-xl font-semibold">
                       {money(estimatedTotal)}
                     </span>
+
                   </div>
 
                 </div>
               </div>
 
-              {/* STONE DETAILS */}
-              {charges.stones.length > 0 && (
+              {/* ==================================================
+                  STONE DETAILS
+              ================================================== */}
+
+              {stoneRows.length > 0 && (
                 <div className="mt-6">
+
                   <h2 className="font-serif text-xl font-semibold text-primary">
                     Stone Details
                   </h2>
 
                   <div className="mt-3 space-y-2">
 
-                    {charges.stones.map((stone) => {
+                    {stoneRows.map((stone) => {
+
                       const rowTotal =
-                        Number(stone.pcs || 0) *
-                        Number(stone.price_per_pc || 0)
+                        num(stone.pcs) *
+                        num(stone.price_per_pc)
 
                       return (
                         <div
                           key={stone.id}
                           className="rounded-xl border border-border/70 p-4"
                         >
+
                           <div className="flex items-start justify-between gap-4">
 
                             <div>
+
                               {stone.stone_name && (
                                 <p className="font-medium">
                                   {stone.stone_name}
@@ -497,8 +776,11 @@ export default async function ProductDetailPage({ params }: PageProps) {
                               )}
 
                               <div className="mt-1 text-xs text-muted-foreground">
+
                                 {stone.size && (
-                                  <span>Size: {stone.size} · </span>
+                                  <span>
+                                    Size: {stone.size} ·{' '}
+                                  </span>
                                 )}
 
                                 {stone.quality && (
@@ -508,9 +790,11 @@ export default async function ProductDetailPage({ params }: PageProps) {
                                 )}
 
                                 <span>
-                                  {Number(stone.pcs || 0)} PC
+                                  {num(stone.pcs)} PC
                                 </span>
+
                               </div>
+
                             </div>
 
                             <p className="font-medium">
@@ -518,34 +802,43 @@ export default async function ProductDetailPage({ params }: PageProps) {
                             </p>
 
                           </div>
+
                         </div>
                       )
                     })}
 
                   </div>
+
                 </div>
               )}
 
-              {/* OTHER CHARGES */}
-              {charges.others.length > 0 && (
+              {/* ==================================================
+                  OTHER CHARGES DETAILS
+              ================================================== */}
+
+              {otherRows.length > 0 && (
                 <div className="mt-6">
+
                   <h2 className="font-serif text-xl font-semibold text-primary">
                     Other Charges
                   </h2>
 
                   <div className="mt-3 space-y-2">
 
-                    {charges.others.map((charge) => {
+                    {otherRows.map((charge) => {
+
                       const rowTotal =
-                        Number(charge.quantity || 0) *
-                        Number(charge.price_per_unit || 0)
+                        num(charge.quantity) *
+                        num(charge.price_per_unit)
 
                       return (
                         <div
                           key={charge.id}
                           className="flex items-center justify-between gap-4 rounded-xl border border-border/70 p-4"
                         >
+
                           <div>
+
                             <p className="font-medium">
                               {charge.charge_type || 'Other'}
                             </p>
@@ -557,24 +850,31 @@ export default async function ProductDetailPage({ params }: PageProps) {
                             )}
 
                             <p className="mt-1 text-xs text-muted-foreground">
-                              Qty: {Number(charge.quantity || 0)}
+                              Qty: {num(charge.quantity)}
                             </p>
+
                           </div>
 
                           <p className="font-medium">
                             {money(rowTotal)}
                           </p>
+
                         </div>
                       )
                     })}
 
                   </div>
+
                 </div>
               )}
 
-              {/* DESCRIPTION */}
+              {/* ==================================================
+                  DESCRIPTION
+              ================================================== */}
+
               {product.description && (
                 <div className="mt-6">
+
                   <h2 className="font-serif text-xl font-semibold text-primary">
                     Description
                   </h2>
@@ -582,11 +882,16 @@ export default async function ProductDetailPage({ params }: PageProps) {
                   <p className="mt-2 whitespace-pre-line text-sm leading-7 text-muted-foreground">
                     {product.description}
                   </p>
+
                 </div>
               )}
 
-              {/* WHATSAPP */}
+              {/* ==================================================
+                  WHATSAPP
+              ================================================== */}
+
               <div className="mt-7">
+
                 <WhatsAppButton
                   whatsappNumber={settings.whatsapp_number}
                   shopName={settings.shop_name}
@@ -595,6 +900,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
                   className="w-full sm:w-auto"
                   label="Enquire on WhatsApp"
                 />
+
               </div>
 
               {!product.is_available && (
@@ -618,6 +924,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
         whatsappNumber={settings.whatsapp_number}
         shopName={settings.shop_name}
       />
+
     </div>
   )
 }
