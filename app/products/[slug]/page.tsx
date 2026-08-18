@@ -152,11 +152,36 @@ export async function generateMetadata({
     return { title: 'Product Not Found' }
   }
 
+  const productImage = product.product_images?.[0]?.public_url || undefined
+
   return {
     title: product.name,
     description:
       product.description ||
       `${product.name} at LEELA JEWELLERS, Jodhpur. Enquire on WhatsApp for today's price and availability.`,
+    openGraph: {
+      title: `${product.name} | LEELA JEWELLERS`,
+      description:
+        product.description ||
+        `${product.name} at LEELA JEWELLERS. Enquire on WhatsApp for today's price and availability.`,
+      type: 'website',
+      images: productImage
+        ? [
+            {
+              url: productImage,
+              alt: product.name,
+            },
+          ]
+        : [],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: `${product.name} | LEELA JEWELLERS`,
+      description:
+        product.description ||
+        `${product.name} at LEELA JEWELLERS.`,
+      images: productImage ? [productImage] : [],
+    },
   }
 }
 
