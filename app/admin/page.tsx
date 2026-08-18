@@ -33,6 +33,7 @@ export default function AdminPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [product, setProduct] = useState<typeof emptyProduct>(emptyProduct)
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false)
+  const [autoSlug, setAutoSlug] = useState(true)
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState('')
   const [message, setMessage] = useState('')
@@ -72,6 +73,7 @@ export default function AdminPage() {
   function resetProduct() {
     setProduct(emptyProduct)
     setSlugManuallyEdited(false)
+    setAutoSlug(true)
     setImageFile(null)
     if (imagePreview) URL.revokeObjectURL(imagePreview)
     setImagePreview('')
@@ -94,6 +96,15 @@ export default function AdminPage() {
     setBusy(false)
     router.refresh()
   }
+
+  useEffect(() => {
+    if (autoSlug && !slugManuallyEdited) {
+      setProduct(prev => ({
+        ...prev,
+        slug: slugify(prev.name),
+      }))
+    }
+  }, [product.name, autoSlug, slugManuallyEdited])
 
   async function saveProduct(e: FormEvent) {
     e.preventDefault()
@@ -295,7 +306,7 @@ export default function AdminPage() {
         <section className="mb-6 rounded-2xl border border-border bg-background p-5">
           <h2 className="font-serif text-2xl font-semibold text-primary">{product.id ? 'Edit Product' : 'Add Product'}</h2>
           <form onSubmit={saveProduct} className="mt-4 grid gap-4 md:grid-cols-2">
-            <label className="text-sm font-medium">Product name<input required className="mt-1 w-full rounded-md border px-3 py-2" value={product.name} onChange={e=>{const name=e.target.value;setProduct({...product,name,slug:slugManuallyEdited?product.slug:slugify(name)})}}/></label>
+            <label className="text-sm font-medium">Product name<input required className="mt-1 w-full rounded-md border px-3 py-2" value={product.name} onChange={e=>{const name=e.target.value;setProduct({...product,name,slug:autoSlug&&!slugManuallyEdited?slugify(name):product.slug})}}/></label>
             <label className="text-sm font-medium">SKU<input className="mt-1 w-full rounded-md border px-3 py-2" value={product.sku} onChange={e=>setProduct({...product,sku:e.target.value})}/></label>
             <label className="text-sm font-medium">Category<select className="mt-1 w-full rounded-md border px-3 py-2" value={product.category_id} onChange={e=>setProduct({...product,category_id:e.target.value})}><option value="">Select category</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
             <label className="text-sm font-medium">Price (₹)<input type="number" min="0" className="mt-1 w-full rounded-md border px-3 py-2" value={product.price} onChange={e=>setProduct({...product,price:e.target.value})}/></label>
@@ -303,10 +314,23 @@ export default function AdminPage() {
             <label className="text-sm font-medium">Weight<input className="mt-1 w-full rounded-md border px-3 py-2" value={product.weight} onChange={e=>setProduct({...product,weight:e.target.value})}/></label>
             <label className="text-sm font-medium">Purity<input className="mt-1 w-full rounded-md border px-3 py-2" value={product.purity} onChange={e=>setProduct({...product,purity:e.target.value})}/></label>
             <label className="text-sm font-medium">Slug
-              <input className="mt-1 w-full rounded-md border px-3 py-2" value={product.slug} onChange={e=>{setSlugManuallyEdited(true);setProduct({...product,slug:e.target.value})}}/>
+              <input className="mt-1 w-full rounded-md border px-3 py-2" value={product.slug}
+                onChange={e=>{setSlugManuallyEdited(true);setAutoSlug(false);setProduct({...product,slug:e.target.value})}}/>
               <span className="mt-1 block text-xs font-normal text-muted-foreground">
-                Automatically generated from the product name. You can edit it manually anytime.
+                {autoSlug ? 'Automatic: generated from Product Name.' : 'Manual: you can edit the slug yourself.'}
               </span>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button type="button" className="rounded-md border px-3 py-1.5 text-xs"
+                  onClick={()=>{setSlugManuallyEdited(false);setAutoSlug(true);setProduct(prev=>({...prev,slug:slugify(prev.name)}))}}>
+                  Generate from name
+                </button>
+                {slugManuallyEdited && (
+                  <button type="button" className="rounded-md border px-3 py-1.5 text-xs"
+                    onClick={()=>{setSlugManuallyEdited(false);setAutoSlug(true);setProduct(prev=>({...prev,slug:slugify(prev.name)}))}}>
+                    Use automatic slug
+                  </button>
+                )}
+              </div>
             </label>
             <label className="text-sm font-medium md:col-span-2">Description<textarea className="mt-1 min-h-24 w-full rounded-md border px-3 py-2" value={product.description} onChange={e=>setProduct({...product,description:e.target.value})}/></label>
 
@@ -327,7 +351,7 @@ export default function AdminPage() {
           <h2 className="font-serif text-2xl font-semibold text-primary">Products</h2>
           <div className="mt-4 space-y-3">
             {products.length === 0 && <p className="text-sm text-muted-foreground">No products yet.</p>}
-            {products.map(p => <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"><div><p className="font-medium">{p.name}</p><p className="text-xs text-muted-foreground">{p.sku || 'No SKU'} · {p.price ? `₹${p.price}` : 'Price on request'}</p></div><div className="flex gap-2"><button onClick={()=>{setSlugManuallyEdited(true);setProduct({...p,id:String(p.id),sku:p.sku??'',category_id:p.category_id??'',rate:p.rate??'',weight:p.weight??'',price:p.price==null?'':String(p.price),purity:p.purity??'',description:p.description??'',is_available:p.is_available,is_featured:p.is_featured})}} className="rounded-md border px-3 py-1.5 text-sm">Edit</button><button onClick={()=>removeProduct(String(p.id))} className="rounded-md border px-3 py-1.5 text-sm">Delete</button></div></div>)}
+            {products.map(p => <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"><div><p className="font-medium">{p.name}</p><p className="text-xs text-muted-foreground">{p.sku || 'No SKU'} · {p.price ? `₹${p.price}` : 'Price on request'}</p></div><div className="flex gap-2"><button onClick={()=>{setSlugManuallyEdited(true);setAutoSlug(false);setProduct({...p,id:String(p.id),sku:p.sku??'',category_id:p.category_id??'',rate:p.rate??'',weight:p.weight??'',price:p.price==null?'':String(p.price),purity:p.purity??'',description:p.description??'',is_available:p.is_available,is_featured:p.is_featured})}} className="rounded-md border px-3 py-1.5 text-sm">Edit</button><button onClick={()=>removeProduct(String(p.id))} className="rounded-md border px-3 py-1.5 text-sm">Delete</button></div></div>)}
           </div>
         </section>
       </div>
