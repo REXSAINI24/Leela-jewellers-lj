@@ -59,6 +59,7 @@ const emptyProduct = {
   description: '',
   is_available: true,
   is_featured: false,
+  stock_quantity: '1',
 }
 
 const emptyPricing: PricingDetails = {
@@ -103,6 +104,7 @@ export default function AdminPage() {
   const [settings, setSettings] = useState<ShopSettings | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [productThumbnails, setProductThumbnails] = useState<Record<string, string>>({})
   const [product, setProduct] = useState<typeof emptyProduct>(emptyProduct)
   const [pricing, setPricing] = useState<PricingDetails>(emptyPricing)
   const [chargeTypes, setChargeTypes] = useState<string[]>([])
@@ -254,6 +256,29 @@ export default function AdminPage() {
       setCategories((c.data as Category[]) ?? [])
       setProducts((p.data as Product[]) ?? [])
 
+      const loadedProducts = (p.data as Product[]) ?? []
+      if (loadedProducts.length > 0) {
+        const { data: imageRows, error: imageRowsError } = await supabase
+          .from('product_images')
+          .select('product_id, public_url, sort_order')
+          .in('product_id', loadedProducts.map(item => item.id))
+          .order('sort_order', { ascending: true })
+
+        if (imageRowsError) {
+          showPopup('error', 'Product Photos Load Failed', errorText(imageRowsError))
+        } else {
+          const thumbnails: Record<string, string> = {}
+          for (const row of imageRows ?? []) {
+            if (row.public_url && !thumbnails[String(row.product_id)]) {
+              thumbnails[String(row.product_id)] = row.public_url
+            }
+          }
+          setProductThumbnails(thumbnails)
+        }
+      } else {
+        setProductThumbnails({})
+      }
+
       if (r.data) {
         setRates({
           gold_24k:
@@ -318,8 +343,8 @@ export default function AdminPage() {
 
       const matchesStatus =
         productStatusFilter === 'all' ||
-        (productStatusFilter === 'available' && p.is_available) ||
-        (productStatusFilter === 'unavailable' && !p.is_available) ||
+        (productStatusFilter === 'available' && p.is_available && num(p.stock_quantity) > 0) ||
+        (productStatusFilter === 'out_of_stock' && (!p.is_available || num(p.stock_quantity) <= 0)) ||
         (productStatusFilter === 'featured' && p.is_featured)
 
       return matchesSearch && matchesCategory && matchesStatus
@@ -960,10 +985,15 @@ export default function AdminPage() {
           product.description.trim() || null,
 
         is_available:
-          product.is_available,
+          product.is_available && num(product.stock_quantity) > 0,
 
         is_featured:
           product.is_featured,
+
+        stock_quantity: Math.max(
+          0,
+          Math.floor(num(product.stock_quantity))
+        ),
 
         gross_weight:
           grossWeight || null,
@@ -1258,6 +1288,9 @@ export default function AdminPage() {
 
       is_featured:
         p.is_featured,
+
+      stock_quantity:
+        String(Math.max(0, Math.floor(num((p as Product).stock_quantity)))),
     })
 
     if (raw) {
@@ -3171,6 +3204,43 @@ export default function AdminPage() {
 
               </div>
 
+              {/* STOCK / AVAILABLE / FEATURED */}
+
+              <section className="rounded-xl border p-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="text-sm font-medium">
+                    Available Pieces (PCS)
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      className="mt-1 w-full rounded-md border px-3 py-2"
+                      value={product.stock_quantity}
+                      onChange={e => {
+                        const value = Math.max(0, Math.floor(num(e.target.value)))
+                        setProduct(prev => ({
+                          ...prev,
+                          stock_quantity: String(value),
+                          is_available: value > 0 ? prev.is_available : false,
+                        }))
+                      }}
+                    />
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      0 PCS automatically saves the product as Out of Stock.
+                    </span>
+                  </label>
+
+                  <div className="rounded-md border bg-secondary/30 px-3 py-2">
+                    <p className="text-xs text-muted-foreground">Current Stock Status</p>
+                    <p className="mt-1 font-semibold">
+                      {num(product.stock_quantity) > 0 && product.is_available
+                        ? `Available · ${num(product.stock_quantity)} PCS`
+                        : 'Out of Stock'}
+                    </p>
+                  </div>
+                </div>
+              </section>
+
               {/* AVAILABLE / FEATURED */}
 
               <div className="flex flex-wrap gap-6">
@@ -3304,7 +3374,7 @@ export default function AdminPage() {
                 >
                   <option value="all">All products</option>
                   <option value="available">Available</option>
-                  <option value="unavailable">Unavailable</option>
+                  <option value="out_of_stock">Out of Stock</option>
                   <option value="featured">Featured</option>
                 </select>
               </label>
@@ -3373,35 +3443,51 @@ export default function AdminPage() {
                     key={p.id}
                     className="flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
                   >
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-medium">
-                          {p.name}
-                        </p>
-                        {p.is_featured && (
-                          <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[11px] font-medium text-yellow-800">
-                            Featured
-                          </span>
+                    <div className="flex min-w-0 items-center gap-4">
+                      <div className="relative size-20 shrink-0 overflow-hidden rounded-lg border bg-secondary">
+                        {productThumbnails[String(p.id)] ? (
+                          <img
+                            src={productThumbnails[String(p.id)]}
+                            alt={p.name}
+                            className="h-full w-full object-contain"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                            No photo
+                          </div>
                         )}
-                        <span className={cn(
-                          'rounded-full px-2 py-0.5 text-[11px] font-medium',
-                          p.is_available
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-red-100 text-red-800'
-                        )}>
-                          {p.is_available ? 'Available' : 'Unavailable'}
-                        </span>
                       </div>
 
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {p.sku || 'No SKU'} · {p.purity || 'Purity not set'} · {p.weight ? `${p.weight} GM` : 'Weight not set'}
-                      </p>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium">{p.name}</p>
+                          {p.is_featured && (
+                            <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[11px] font-medium text-yellow-800">
+                              Featured
+                            </span>
+                          )}
+                          <span className={cn(
+                            'rounded-full px-2 py-0.5 text-[11px] font-medium',
+                            p.is_available && num(p.stock_quantity) > 0
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-red-100 text-red-800'
+                          )}>
+                            {p.is_available && num(p.stock_quantity) > 0
+                              ? `Available · ${num(p.stock_quantity)} PCS`
+                              : 'Out of Stock'}
+                          </span>
+                        </div>
 
-                      <p className="mt-1 text-sm font-medium">
-                        {p.price != null && num(p.price) > 0
-                          ? money(num(p.price))
-                          : 'Price on request'}
-                      </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {p.sku || 'No SKU'} · {p.purity || 'Purity not set'} · {p.weight ? `${p.weight} GM` : 'Weight not set'}
+                        </p>
+
+                        <p className="mt-1 text-sm font-medium">
+                          {p.price != null && num(p.price) > 0
+                            ? money(num(p.price))
+                            : 'Price on request'}
+                        </p>
+                      </div>
                     </div>
 
                     <div className="flex shrink-0 gap-2">
