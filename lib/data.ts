@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import type {
   Category,
+  MetalRates,
   ProductWithRelations,
   ShopSettings,
 } from '@/lib/types'
@@ -8,7 +9,9 @@ import type {
 const PRODUCT_SELECT =
   '*, categories ( id, name, slug ), product_images ( id, product_id, storage_path, public_url, sort_order, created_at )'
 
-function sortImages(products: ProductWithRelations[]): ProductWithRelations[] {
+function sortImages(
+  products: ProductWithRelations[],
+): ProductWithRelations[] {
   return products.map((p) => ({
     ...p,
     product_images: [...(p.product_images ?? [])].sort(
@@ -19,6 +22,7 @@ function sortImages(products: ProductWithRelations[]): ProductWithRelations[] {
 
 export async function getShopSettings(): Promise<ShopSettings> {
   const supabase = await createClient()
+
   const { data } = await supabase
     .from('shop_settings')
     .select('*')
@@ -42,31 +46,67 @@ export async function getShopSettings(): Promise<ShopSettings> {
 
 export async function getCategories(): Promise<Category[]> {
   const supabase = await createClient()
+
   const { data } = await supabase
     .from('categories')
     .select('*')
     .order('sort_order', { ascending: true })
+
   return data ?? []
+}
+
+/*
+ * ============================================================
+ * CURRENT METAL RATES
+ * ============================================================
+ *
+ * Admin Panel me save ki hui current Gold/Silver rates
+ * website par bhi available rahengi.
+ */
+export async function getMetalRates(): Promise<MetalRates> {
+  const supabase = await createClient()
+
+  const { data } = await supabase
+    .from('metal_rates')
+    .select('gold_24k, gold_22k, silver, updated_at')
+    .eq('id', 1)
+    .maybeSingle()
+
+  return (
+    data ?? {
+      gold_24k: null,
+      gold_22k: null,
+      silver: null,
+      updated_at: null,
+    }
+  )
 }
 
 export async function getFeaturedProducts(
   limit = 6,
 ): Promise<ProductWithRelations[]> {
   const supabase = await createClient()
+
   const { data } = await supabase
     .from('products')
     .select(PRODUCT_SELECT)
     .eq('is_featured', true)
     .order('created_at', { ascending: false })
     .limit(limit)
-  return sortImages((data as ProductWithRelations[]) ?? [])
+
+  return sortImages(
+    (data as ProductWithRelations[]) ?? [],
+  )
 }
 
-export async function getProducts(params: {
-  category?: string
-  search?: string
-} = {}): Promise<ProductWithRelations[]> {
+export async function getProducts(
+  params: {
+    category?: string
+    search?: string
+  } = {},
+): Promise<ProductWithRelations[]> {
   const supabase = await createClient()
+
   let query = supabase
     .from('products')
     .select(PRODUCT_SELECT)
@@ -78,7 +118,10 @@ export async function getProducts(params: {
       .select('id')
       .eq('slug', params.category)
       .maybeSingle()
-    if (cat) query = query.eq('category_id', cat.id)
+
+    if (cat) {
+      query = query.eq('category_id', cat.id)
+    }
   }
 
   if (params.search) {
@@ -88,24 +131,38 @@ export async function getProducts(params: {
   }
 
   const { data } = await query
-  return sortImages((data as ProductWithRelations[]) ?? [])
+
+  return sortImages(
+    (data as ProductWithRelations[]) ?? [],
+  )
 }
 
 export async function getProductBySlug(
   slug: string,
 ): Promise<ProductWithRelations | null> {
   const supabase = await createClient()
+
   const { data } = await supabase
     .from('products')
     .select(PRODUCT_SELECT)
     .eq('slug', slug)
     .maybeSingle()
-  if (!data) return null
-  return sortImages([data as ProductWithRelations])[0]
+
+  if (!data) {
+    return null
+  }
+
+  return sortImages([
+    data as ProductWithRelations,
+  ])[0]
 }
 
 export async function getAllProductSlugs(): Promise<string[]> {
   const supabase = await createClient()
-  const { data } = await supabase.from('products').select('slug')
+
+  const { data } = await supabase
+    .from('products')
+    .select('slug')
+
   return (data ?? []).map((p) => p.slug)
 }
