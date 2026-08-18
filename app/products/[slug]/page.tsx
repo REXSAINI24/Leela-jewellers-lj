@@ -512,7 +512,7 @@ export default async function ProductDetailPage({
 
             <div>
 
-              <div className="relative aspect-square overflow-hidden rounded-2xl border border-border/70 bg-secondary">
+              <div className="relative aspect-[3/4] overflow-hidden rounded-2xl border border-border/70 bg-secondary">
 
                 {productImages.length > 0 ? (
 
@@ -558,7 +558,7 @@ export default async function ProductDetailPage({
                                   index === 0
                                 }
                                 sizes="(max-width: 768px) 100vw, 50vw"
-                                className="object-cover"
+                                className="object-contain"
                               />
                             </div>
 
@@ -614,7 +614,7 @@ export default async function ProductDetailPage({
                               }`}
                               fill
                               sizes="96px"
-                              className="object-cover"
+                              className="object-contain p-1"
                             />
 
                           </label>
