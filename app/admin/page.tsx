@@ -6,392 +6,71 @@ import { createClient } from '@/lib/supabase/client'
 import type { Category, Product, ShopSettings } from '@/lib/types'
 import { slugify } from '@/lib/format'
 
-const emptyProduct = {
-  id: '',
-  name: '',
-  slug: '',
-  sku: '',
-  category_id: '',
-  rate: '',
-  weight: '',
-  price: '',
-  purity: '',
-  description: '',
-  is_available: true,
-  is_featured: false,
-}
+type Stone={id:string;name:string;size:string;quality:string;pcs:string;price:string;weight:string}
+type Other={id:string;type:string;description:string;qty:string;price:string}
+type Pricing={gross:string;stone:string;net:string;wastage:string;wastageType:'percent'|'fixed';wastageBasis:'metal_value'|'net_weight'|'gross_weight';making:string;makingType:'per_gram'|'percent'|'fixed';makingBasis:'net_weight'|'gross_weight';gst:string;stones:Stone[];others:Other[]}
+const emptyProduct={id:'',name:'',slug:'',sku:'',category_id:'',rate:'',weight:'',price:'',purity:'',description:'',is_available:true,is_featured:false}
+const emptyPricing:Pricing={gross:'',stone:'0',net:'',wastage:'',wastageType:'percent',wastageBasis:'metal_value',making:'',makingType:'per_gram',makingBasis:'net_weight',gst:'3',stones:[],others:[]}
+const BUCKET='product-images'
+const n=(x:any)=>Number.isFinite(Number(x))?Number(x):0
+const money=(x:number)=>`₹${Math.max(0,x).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}`
+const uid=()=>crypto.randomUUID()
 
-const BUCKET = 'product-images'
-
-export default function AdminPage() {
-  const router = useRouter()
-  const supabase = createClient()
-  const [ready, setReady] = useState(false)
-  const [authorized, setAuthorized] = useState(false)
-  const [settings, setSettings] = useState<ShopSettings | null>(null)
-  const [categories, setCategories] = useState<Category[]>([])
-  const [products, setProducts] = useState<Product[]>([])
-  const [product, setProduct] = useState<typeof emptyProduct>(emptyProduct)
-  const [slugManuallyEdited, setSlugManuallyEdited] = useState(false)
-  const [autoSlug, setAutoSlug] = useState(true)
-  const [rates, setRates] = useState({ gold_24k: '', gold_22k: '', silver: '' })
-  const [ratesBusy, setRatesBusy] = useState(false)
-  const [imageFile, setImageFile] = useState<File | null>(null)
-  const [imagePreview, setImagePreview] = useState('')
-  const [message, setMessage] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [newCategory, setNewCategory] = useState('')
-  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
-  const [editingCategoryName, setEditingCategoryName] = useState('')
-
-  async function load() {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { router.replace('/admin/login'); return }
-    const { data: admin } = await supabase.from('admin_users').select('user_id').eq('user_id', user.id).maybeSingle()
-    if (!admin) { await supabase.auth.signOut(); router.replace('/admin/login'); return }
-    const [s, c, p] = await Promise.all([
-      supabase.from('shop_settings').select('*').eq('id', 1).maybeSingle(),
-      supabase.from('categories').select('*').order('sort_order', { ascending: true }),
-      supabase.from('products').select('*').order('created_at', { ascending: false }),
-    ])
-    setSettings(s.data as ShopSettings | null)
-    setCategories((c.data as Category[]) ?? [])
-    setProducts((p.data as Product[]) ?? [])
-    setAuthorized(true)
-    setReady(true)
-  }
-
-  useEffect(() => { load() }, [])
-
-  const canSaveProduct = useMemo(() => product.name.trim().length > 0, [product.name])
-
-  function chooseImage(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null
-    setImageFile(file)
-    if (imagePreview) URL.revokeObjectURL(imagePreview)
-    setImagePreview(file ? URL.createObjectURL(file) : '')
-  }
-
-  function resetProduct() {
-    setProduct(emptyProduct)
-    setSlugManuallyEdited(false)
-    setAutoSlug(true)
-    setImageFile(null)
-    if (imagePreview) URL.revokeObjectURL(imagePreview)
-    setImagePreview('')
-  }
-
-  async function saveSettings(e: FormEvent) {
-    e.preventDefault()
-    if (!settings) return
-    setBusy(true); setMessage('')
-    const { error } = await supabase.from('shop_settings').update({
-      shop_name: settings.shop_name,
-      address: settings.address,
-      phone: settings.phone,
-      whatsapp_number: settings.whatsapp_number,
-      google_maps_url: settings.google_maps_url,
-      about: settings.about,
-      updated_at: new Date().toISOString(),
-    }).eq('id', 1)
-    setMessage(error ? error.message : 'Shop details saved.')
-    setBusy(false)
-    router.refresh()
-  }
-
-  useEffect(() => {
-    async function loadRates() {
-      const { data } = await supabase.from('metal_rates').select('gold_24k, gold_22k, silver').eq('id', 1).maybeSingle()
-      if (data) setRates({ gold_24k: data.gold_24k == null ? '' : String(data.gold_24k), gold_22k: data.gold_22k == null ? '' : String(data.gold_22k), silver: data.silver == null ? '' : String(data.silver) })
-    }
-    loadRates()
-  }, [])
-
-  useEffect(() => {
-    if (autoSlug && !slugManuallyEdited) {
-      setProduct(prev => ({
-        ...prev,
-        slug: slugify(prev.name),
-      }))
-    }
-  }, [product.name, autoSlug, slugManuallyEdited])
-
-  async function saveRates() {
-    setRatesBusy(true); setMessage('')
-    const payload = { id: 1, gold_24k: rates.gold_24k === '' ? null : Number(rates.gold_24k), gold_22k: rates.gold_22k === '' ? null : Number(rates.gold_22k), silver: rates.silver === '' ? null : Number(rates.silver), updated_at: new Date().toISOString() }
-    const { error } = await supabase.from('metal_rates').upsert(payload, { onConflict: 'id' })
-    setMessage(error ? `Could not save metal rates: ${error.message}` : 'Metal rates saved successfully.')
-    setRatesBusy(false)
-  }
-
-  async function saveProduct(e: FormEvent) {
-    e.preventDefault()
-    if (!canSaveProduct) return
-    setBusy(true); setMessage('')
-
-    const payload = {
-      name: product.name.trim(),
-      slug: (product.slug.trim() || slugify(product.name)).trim(),
-      sku: product.sku.trim() || null,
-      category_id: product.category_id || null,
-      rate: product.rate.trim() || null,
-      weight: product.weight.trim() || null,
-      price: product.price === '' ? null : Number(product.price),
-      purity: product.purity.trim() || null,
-      description: product.description.trim() || null,
-      is_available: product.is_available,
-      is_featured: product.is_featured,
-      updated_at: new Date().toISOString(),
-    }
-
-    const duplicateQuery = product.id
-      ? await supabase.from('products').select('id').eq('slug', payload.slug).neq('id', product.id).maybeSingle()
-      : await supabase.from('products').select('id').eq('slug', payload.slug).maybeSingle()
-
-    if (duplicateQuery.error) {
-      setMessage(`Could not check slug: ${duplicateQuery.error.message}`)
-      setBusy(false)
-      return
-    }
-
-    if (duplicateQuery.data) {
-      setMessage('This slug is already used by another product. Please edit the slug.')
-      setBusy(false)
-      return
-    }
-
-    const result = product.id
-      ? await supabase.from('products').update(payload).eq('id', product.id).select('id').single()
-      : await supabase.from('products').insert(payload).select('id').single()
-
-    if (result.error || !result.data) {
-      setMessage(result.error?.message ?? 'Could not save product.')
-      setBusy(false)
-      return
-    }
-
-    const productId = String(result.data.id)
-
-    if (imageFile) {
-      if (!imageFile.type.startsWith('image/')) {
-        setMessage('Please choose an image file.')
-        setBusy(false)
-        return
-      }
-      if (imageFile.size > 8 * 1024 * 1024) {
-        setMessage('Image must be 8 MB or smaller.')
-        setBusy(false)
-        return
-      }
-
-      const safeName = imageFile.name.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
-      const path = `${productId}/${crypto.randomUUID()}-${safeName || 'image.jpg'}`
-      const upload = await supabase.storage.from(BUCKET).upload(path, imageFile, {
-        cacheControl: '3600',
-        upsert: false,
-        contentType: imageFile.type,
-      })
-
-      if (upload.error) {
-        setMessage(`Product saved, but image upload failed: ${upload.error.message}`)
-        await load()
-        setBusy(false)
-        return
-      }
-
-      const { data: publicData } = supabase.storage.from(BUCKET).getPublicUrl(path)
-      const imageInsert = await supabase.from('product_images').insert({
-        product_id: productId,
-        storage_path: path,
-        public_url: publicData.publicUrl,
-        sort_order: 0,
-      })
-
-      if (imageInsert.error) {
-        setMessage(`Product saved, but image record failed: ${imageInsert.error.message}`)
-        await load()
-        setBusy(false)
-        return
-      }
-    }
-
-    setMessage(product.id ? 'Product updated successfully.' : 'Product added successfully.')
-    resetProduct()
-    await load()
-    setBusy(false)
-  }
-
-  async function removeProduct(id: string) {
-    if (!confirm('Delete this product?')) return
-    setBusy(true)
-    const { data: images } = await supabase.from('product_images').select('storage_path').eq('product_id', id)
-    if (images?.length) await supabase.storage.from(BUCKET).remove(images.map(x => x.storage_path))
-    await supabase.from('product_images').delete().eq('product_id', id)
-    const { error } = await supabase.from('products').delete().eq('id', id)
-    setMessage(error ? error.message : 'Product deleted.')
-    await load(); setBusy(false)
-  }
-
-
-  async function addCategory() {
-    const name = newCategory.trim()
-    if (!name) return
-    setBusy(true); setMessage('')
-    const slug = slugify(name)
-    const sort_order = categories.length ? Math.max(...categories.map(c => c.sort_order)) + 1 : 1
-    const { error } = await supabase.from('categories').insert({ name, slug, sort_order })
-    setMessage(error ? error.message : 'Category added successfully.')
-    if (!error) setNewCategory('')
-    await load(); setBusy(false)
-  }
-
-  async function updateCategory(id: string) {
-    const name = editingCategoryName.trim()
-    if (!name) return
-    setBusy(true); setMessage('')
-    const { error } = await supabase.from('categories').update({ name, slug: slugify(name) }).eq('id', id)
-    setMessage(error ? error.message : 'Category updated successfully.')
-    if (!error) { setEditingCategoryId(null); setEditingCategoryName('') }
-    await load(); setBusy(false)
-  }
-
-  async function removeCategory(id: string) {
-    if (!confirm('Delete this category? Products already using it may prevent deletion.')) return
-    setBusy(true); setMessage('')
-    const { error } = await supabase.from('categories').delete().eq('id', id)
-    setMessage(error ? `Could not delete category: ${error.message}` : 'Category deleted.')
-    await load(); setBusy(false)
-  }
-
-  async function signOut() {
-    await supabase.auth.signOut()
-    router.replace('/admin/login')
-    router.refresh()
-  }
-
-  if (!ready) return <main className="min-h-svh p-8 text-center">Loading owner dashboard…</main>
-  if (!authorized) return null
-
-  return (
-    <main className="min-h-svh bg-secondary/30 px-4 py-6 md:px-8">
-      <div className="mx-auto max-w-6xl">
-        <header className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-background p-5">
-          <div><p className="text-xs uppercase tracking-[0.25em] text-gold">LEELA JEWELLERS</p><h1 className="font-serif text-3xl font-semibold text-primary">Owner Dashboard</h1></div>
-          <div className="flex gap-2"><button onClick={()=>router.push('/')} className="rounded-md border px-4 py-2 text-sm">View website</button><button onClick={signOut} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">Logout</button></div>
-        </header>
-
-        {message && <div className="mb-4 rounded-md border bg-background px-4 py-3 text-sm">{message}</div>}
-
-        <section className="mb-6 rounded-2xl border border-border bg-background p-5">
-          <h2 className="font-serif text-2xl font-semibold text-primary">Shop Details</h2>
-          <form onSubmit={saveSettings} className="mt-4 grid gap-4 md:grid-cols-2">
-            {settings && <>
-              {([
-                ['shop_name','Shop name'],['phone','Mobile number'],['whatsapp_number','WhatsApp number'],['address','Address'],['google_maps_url','Google Maps URL']
-              ] as const).map(([key,label]) => (
-                <label key={key} className="text-sm font-medium">{label}
-                  <input className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" value={(settings as any)[key] ?? ''} onChange={e=>setSettings({...settings,[key]:e.target.value})}/>
-                </label>
-              ))}
-              <label className="text-sm font-medium md:col-span-2">About
-                <textarea className="mt-1 min-h-24 w-full rounded-md border border-border bg-background px-3 py-2" value={settings.about ?? ''} onChange={e=>setSettings({...settings,about:e.target.value})}/>
-              </label>
-            </>}
-            <button disabled={busy} className="rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground md:w-fit">Save shop details</button>
-          </form>
-        </section>
-
-
-        <section className="mb-6 rounded-2xl border border-border bg-background p-5">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div><p className="text-xs uppercase tracking-[0.2em] text-gold">Market Rates</p><h2 className="font-serif text-2xl font-semibold text-primary">Daily Metal Rates</h2></div>
-            <p className="text-xs text-muted-foreground">Update whenever your shop's current rates change.</p>
-          </div>
-          <div className="mt-4 grid gap-4 md:grid-cols-3">
-            <label className="text-sm font-medium">Gold 24K (₹/gram)
-              <input type="number" min="0" step="0.01" className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" value={rates.gold_24k} onChange={e=>setRates({...rates,gold_24k:e.target.value})} placeholder="e.g. 10000"/>
-            </label>
-            <label className="text-sm font-medium">Gold 22K (₹/gram)
-              <input type="number" min="0" step="0.01" className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" value={rates.gold_22k} onChange={e=>setRates({...rates,gold_22k:e.target.value})} placeholder="e.g. 9200"/>
-            </label>
-            <label className="text-sm font-medium">Silver (₹/gram)
-              <input type="number" min="0" step="0.01" className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" value={rates.silver} onChange={e=>setRates({...rates,silver:e.target.value})} placeholder="e.g. 120"/>
-            </label>
-          </div>
-          <button type="button" disabled={ratesBusy} onClick={saveRates} className="mt-4 rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">{ratesBusy ? 'Saving…' : 'Save metal rates'}</button>
-        </section>
-
-        <section className="mb-6 rounded-2xl border border-border bg-background p-5">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div><p className="text-xs uppercase tracking-[0.2em] text-gold">Catalogue</p><h2 className="font-serif text-2xl font-semibold text-primary">Categories</h2></div>
-            <div className="flex w-full gap-2 sm:w-auto">
-              <input className="min-w-0 flex-1 rounded-md border px-3 py-2 text-sm sm:w-64" placeholder="New category name" value={newCategory} onChange={e=>setNewCategory(e.target.value)} />
-              <button type="button" disabled={busy || !newCategory.trim()} onClick={addCategory} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">Add</button>
-            </div>
-          </div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {categories.map(c => <div key={c.id} className="flex items-center justify-between gap-2 rounded-lg border p-3">
-              {editingCategoryId === c.id ? <div className="flex min-w-0 flex-1 gap-2"><input className="min-w-0 flex-1 rounded-md border px-2 py-1 text-sm" value={editingCategoryName} onChange={e=>setEditingCategoryName(e.target.value)} /><button type="button" disabled={busy} onClick={()=>updateCategory(c.id)} className="rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground">Save</button></div> : <>
-                <span className="truncate text-sm font-medium">{c.name}</span>
-                <div className="flex shrink-0 gap-1"><button type="button" disabled={busy} onClick={()=>{setEditingCategoryId(c.id);setEditingCategoryName(c.name)}} className="rounded-md border px-2 py-1 text-xs">Edit</button><button type="button" disabled={busy} onClick={()=>removeCategory(c.id)} className="rounded-md border px-2 py-1 text-xs">Delete</button></div>
-              </>}
-            </div>)}
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">You can add more categories anytime. Categories used by existing products may need those products reassigned before deletion.</p>
-        </section>
-
-        <section className="mb-6 rounded-2xl border border-border bg-background p-5">
-          <h2 className="font-serif text-2xl font-semibold text-primary">{product.id ? 'Edit Product' : 'Add Product'}</h2>
-          <form onSubmit={saveProduct} className="mt-4 grid gap-4 md:grid-cols-2">
-            <label className="text-sm font-medium">Product name<input required className="mt-1 w-full rounded-md border px-3 py-2" value={product.name} onChange={e=>{const name=e.target.value;setProduct({...product,name,slug:autoSlug&&!slugManuallyEdited?slugify(name):product.slug})}}/></label>
-            <label className="text-sm font-medium">SKU<input className="mt-1 w-full rounded-md border px-3 py-2" value={product.sku} onChange={e=>setProduct({...product,sku:e.target.value})}/></label>
-            <label className="text-sm font-medium">Category<select className="mt-1 w-full rounded-md border px-3 py-2" value={product.category_id} onChange={e=>setProduct({...product,category_id:e.target.value})}><option value="">Select category</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-            <label className="text-sm font-medium">Price (₹)<input type="number" min="0" className="mt-1 w-full rounded-md border px-3 py-2" value={product.price} onChange={e=>setProduct({...product,price:e.target.value})}/></label>
-            <label className="text-sm font-medium">Rate<input className="mt-1 w-full rounded-md border px-3 py-2" value={product.rate} onChange={e=>setProduct({...product,rate:e.target.value})}/></label>
-            <label className="text-sm font-medium">Weight<input className="mt-1 w-full rounded-md border px-3 py-2" value={product.weight} onChange={e=>setProduct({...product,weight:e.target.value})}/></label>
-            <label className="text-sm font-medium">Purity<input className="mt-1 w-full rounded-md border px-3 py-2" value={product.purity} onChange={e=>setProduct({...product,purity:e.target.value})}/></label>
-            <label className="text-sm font-medium">Slug
-              <input className="mt-1 w-full rounded-md border px-3 py-2" value={product.slug}
-                onChange={e=>{setSlugManuallyEdited(true);setAutoSlug(false);setProduct({...product,slug:e.target.value})}}/>
-              <span className="mt-1 block text-xs font-normal text-muted-foreground">
-                {autoSlug ? 'Automatic: generated from Product Name.' : 'Manual: you can edit the slug yourself.'}
-              </span>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button type="button" className="rounded-md border px-3 py-1.5 text-xs"
-                  onClick={()=>{setSlugManuallyEdited(false);setAutoSlug(true);setProduct(prev=>({...prev,slug:slugify(prev.name)}))}}>
-                  Generate from name
-                </button>
-                {slugManuallyEdited && (
-                  <button type="button" className="rounded-md border px-3 py-1.5 text-xs"
-                    onClick={()=>{setSlugManuallyEdited(false);setAutoSlug(true);setProduct(prev=>({...prev,slug:slugify(prev.name)}))}}>
-                    Use automatic slug
-                  </button>
-                )}
-              </div>
-            </label>
-            <label className="text-sm font-medium md:col-span-2">Description<textarea className="mt-1 min-h-24 w-full rounded-md border px-3 py-2" value={product.description} onChange={e=>setProduct({...product,description:e.target.value})}/></label>
-
-            <div className="rounded-xl border border-dashed p-4 md:col-span-2">
-              <label className="text-sm font-medium">Product photo</label>
-              <input className="mt-2 block w-full text-sm" type="file" accept="image/jpeg,image/png,image/webp,image/avif" onChange={chooseImage}/>
-              <p className="mt-1 text-xs text-muted-foreground">Choose one JPG, PNG, WebP or AVIF image up to 8 MB.</p>
-              {imagePreview && <img src={imagePreview} alt="Selected product" className="mt-3 h-32 w-32 rounded-lg border object-cover" />}
-            </div>
-
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={product.is_available} onChange={e=>setProduct({...product,is_available:e.target.checked})}/> Available</label>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={product.is_featured} onChange={e=>setProduct({...product,is_featured:e.target.checked})}/> Featured</label>
-            <div className="flex gap-2 md:col-span-2"><button disabled={busy || !canSaveProduct} className="rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">{busy ? 'Saving…' : product.id ? 'Update product' : 'Add product'}</button>{product.id && <button type="button" onClick={resetProduct} className="rounded-md border px-4 py-2.5 text-sm">Cancel</button>}</div>
-          </form>
-        </section>
-
-        <section className="rounded-2xl border border-border bg-background p-5">
-          <h2 className="font-serif text-2xl font-semibold text-primary">Products</h2>
-          <div className="mt-4 space-y-3">
-            {products.length === 0 && <p className="text-sm text-muted-foreground">No products yet.</p>}
-            {products.map(p => <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"><div><p className="font-medium">{p.name}</p><p className="text-xs text-muted-foreground">{p.sku || 'No SKU'} · {p.price ? `₹${p.price}` : 'Price on request'}</p></div><div className="flex gap-2"><button onClick={()=>{setSlugManuallyEdited(true);setAutoSlug(false);setProduct({...p,id:String(p.id),sku:p.sku??'',category_id:p.category_id??'',rate:p.rate??'',weight:p.weight??'',price:p.price==null?'':String(p.price),purity:p.purity??'',description:p.description??'',is_available:p.is_available,is_featured:p.is_featured})}} className="rounded-md border px-3 py-1.5 text-sm">Edit</button><button onClick={()=>removeProduct(String(p.id))} className="rounded-md border px-3 py-1.5 text-sm">Delete</button></div></div>)}
-          </div>
-        </section>
-      </div>
-    </main>
-  )
+export default function AdminPage(){
+ const router=useRouter(); const supabase=createClient()
+ const [ready,setReady]=useState(false),[authorized,setAuthorized]=useState(false),[settings,setSettings]=useState<ShopSettings|null>(null),[categories,setCategories]=useState<Category[]>([]),[products,setProducts]=useState<Product[]>([])
+ const [product,setProduct]=useState<typeof emptyProduct>(emptyProduct),[pricing,setPricing]=useState<Pricing>(emptyPricing),[chargeTypes,setChargeTypes]=useState<string[]>([])
+ const [rates,setRates]=useState({gold_24k:'',gold_22k:'',silver:''}),[ratesBusy,setRatesBusy]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState('')
+ const [imageFile,setImageFile]=useState<File|null>(null),[imagePreview,setImagePreview]=useState(''),[autoSlug,setAutoSlug]=useState(true),[slugManual,setSlugManual]=useState(false)
+ const [newCategory,setNewCategory]=useState(''),[editingCategoryId,setEditingCategoryId]=useState<string|null>(null),[editingCategoryName,setEditingCategoryName]=useState(''),[newChargeType,setNewChargeType]=useState('')
+ async function load(){
+  const {data:{user}}=await supabase.auth.getUser(); if(!user){router.replace('/admin/login');return}
+  const {data:admin}=await supabase.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle(); if(!admin){await supabase.auth.signOut();router.replace('/admin/login');return}
+  const [s,c,p,r,ct]=await Promise.all([supabase.from('shop_settings').select('*').eq('id',1).maybeSingle(),supabase.from('categories').select('*').order('sort_order'),supabase.from('products').select('*').order('created_at',{ascending:false}),supabase.from('metal_rates').select('gold_24k,gold_22k,silver').eq('id',1).maybeSingle(),supabase.from('other_charge_types').select('name').order('name')])
+  setSettings(s.data as ShopSettings|null);setCategories((c.data as Category[])??[]);setProducts((p.data as Product[])??[]);setChargeTypes((ct.data??[]).map((x:any)=>x.name));if(r.data)setRates({gold_24k:r.data.gold_24k==null?'':String(r.data.gold_24k),gold_22k:r.data.gold_22k==null?'':String(r.data.gold_22k),silver:r.data.silver==null?'':String(r.data.silver)});setAuthorized(true);setReady(true)
+ }
+ useEffect(()=>{load()},[])
+ useEffect(()=>{if(autoSlug&&!slugManual)setProduct(p=>({...p,slug:slugify(p.name)}))},[product.name,autoSlug,slugManual])
+ const stoneWeight=useMemo(()=>pricing.stones.reduce((s,r)=>s+n(r.weight),0),[pricing.stones]); const gross=n(pricing.gross); const stoneW=pricing.stones.length?stoneWeight:n(pricing.stone); const net=Math.max(0,gross-stoneW)
+ const category=categories.find(c=>c.id===product.category_id)?.name?.toLowerCase()||'';const purity=product.purity.toLowerCase();const rate=category.includes('silver')||purity.includes('silver')?n(rates.silver):purity.includes('24')?n(rates.gold_24k):n(rates.gold_22k)||n(product.rate);const metal=net*rate
+ const wastage=pricing.wastageType==='fixed'?n(pricing.wastage):n(pricing.wastage)*(pricing.wastageBasis==='net_weight'?net:pricing.wastageBasis==='gross_weight'?gross:metal)/100
+ const making=pricing.makingType==='fixed'?n(pricing.making):pricing.makingType==='percent'?metal*n(pricing.making)/100:n(pricing.making)*(pricing.makingBasis==='gross_weight'?gross:net)
+ const stoneTotal=pricing.stones.reduce((s,r)=>s+n(r.pcs)*n(r.price),0),otherTotal=pricing.others.reduce((s,r)=>s+n(r.qty)*n(r.price),0),subtotal=metal+wastage+making+stoneTotal+otherTotal,gst=subtotal*n(pricing.gst)/100,total=subtotal+gst
+ function setP(k:keyof Pricing,v:any){setPricing(p=>({...p,[k]:v}))}
+ function chooseImage(e:ChangeEvent<HTMLInputElement>){const f=e.target.files?.[0]??null;setImageFile(f);if(imagePreview)URL.revokeObjectURL(imagePreview);setImagePreview(f?URL.createObjectURL(f):'')}
+ function reset(){setProduct(emptyProduct);setPricing(emptyPricing);setImageFile(null);setImagePreview('');setAutoSlug(true);setSlugManual(false)}
+ async function saveRates(){setRatesBusy(true);const {error}=await supabase.from('metal_rates').upsert({id:1,gold_24k:rates.gold_24k===''?null:n(rates.gold_24k),gold_22k:rates.gold_22k===''?null:n(rates.gold_22k),silver:rates.silver===''?null:n(rates.silver),updated_at:new Date().toISOString()},{onConflict:'id'});setMessage(error?.message||'Metal rates saved successfully.');setRatesBusy(false)}
+ async function saveProduct(e:FormEvent){e.preventDefault();if(!product.name.trim())return;setBusy(true);setMessage('');const slug=(product.slug.trim()||slugify(product.name)).trim();const dup=product.id?await supabase.from('products').select('id').eq('slug',slug).neq('id',product.id).maybeSingle():await supabase.from('products').select('id').eq('slug',slug).maybeSingle();if(dup.error||dup.data){setMessage(dup.error?.message||'This slug is already used.');setBusy(false);return}
+  const pricing_details={gross_weight:String(gross),stone_weight:String(stoneW),net_weight:String(net),wastage_value:pricing.wastage,wastage_type:pricing.wastageType,wastage_basis:pricing.wastageBasis,making_value:pricing.making,making_type:pricing.makingType,making_basis:pricing.makingBasis,gst_percent:pricing.gst,stones:pricing.stones,other_charges:pricing.others,calculated:{rate,metal,wastage,making,stoneTotal,otherTotal,subtotal,gst,total}}
+  const payload:any={name:product.name.trim(),slug,sku:product.sku.trim()||null,category_id:product.category_id||null,rate:product.rate.trim()||null,weight:gross?String(gross):null,price:null,purity:product.purity.trim()||null,description:product.description.trim()||null,is_available:product.is_available,is_featured:product.is_featured,gross_weight:gross||null,stone_weight:stoneW||0,net_weight:net||0,wastage_value:n(pricing.wastage)||0,wastage_type:pricing.wastageType,wastage_basis:pricing.wastageBasis,making_value:n(pricing.making)||0,making_type:pricing.makingType,making_basis:pricing.makingBasis,gst_percent:n(pricing.gst)||0,pricing_details,updated_at:new Date().toISOString()}
+  const result=product.id?await supabase.from('products').update(payload).eq('id',product.id).select('id').single():await supabase.from('products').insert(payload).select('id').single();if(result.error||!result.data){setMessage(result.error?.message||'Could not save product.');setBusy(false);return}const pid=String(result.data.id)
+  if(imageFile){if(!imageFile.type.startsWith('image/')||imageFile.size>8*1024*1024){setMessage('Image must be an image file up to 8 MB.');setBusy(false);return}const safe=imageFile.name.toLowerCase().replace(/[^a-z0-9._-]+/g,'-');const path=`${pid}/${crypto.randomUUID()}-${safe}`;const up=await supabase.storage.from(BUCKET).upload(path,imageFile,{cacheControl:'3600',upsert:false,contentType:imageFile.type});if(up.error){setMessage(`Product saved, but image upload failed: ${up.error.message}`);await load();setBusy(false);return}const {data:pub}=supabase.storage.from(BUCKET).getPublicUrl(path);const ins=await supabase.from('product_images').insert({product_id:pid,storage_path:path,public_url:pub.publicUrl,sort_order:0});if(ins.error){setMessage(`Product saved, but image record failed: ${ins.error.message}`);await load();setBusy(false);return}}
+  setMessage(product.id?'Product updated successfully.':'Product added successfully.');reset();await load();setBusy(false)
+ }
+ async function editProduct(p:Product){const x:any=p;setProduct({id:String(p.id),name:p.name??'',slug:p.slug??'',sku:p.sku??'',category_id:p.category_id??'',rate:p.rate??'',weight:p.weight??'',price:'',purity:p.purity??'',description:p.description??'',is_available:p.is_available,is_featured:p.is_featured});setAutoSlug(false);setSlugManual(true);const d=x.pricing_details;if(d)setPricing({...emptyPricing,...d,stones:Array.isArray(d.stones)?d.stones:[],others:Array.isArray(d.other_charges)?d.other_charges:[]});else setPricing({...emptyPricing,gross:String(x.gross_weight??p.weight??''),stone:String(x.stone_weight??0),net:String(x.net_weight??'')});window.scrollTo({top:document.body.scrollHeight/2,behavior:'smooth'})}
+ async function removeProduct(id:string){if(!confirm('Delete this product?'))return;setBusy(true);const {data:imgs}=await supabase.from('product_images').select('storage_path').eq('product_id',id);if(imgs?.length)await supabase.storage.from(BUCKET).remove(imgs.map((x:any)=>x.storage_path));await supabase.from('product_images').delete().eq('product_id',id);const {error}=await supabase.from('products').delete().eq('id',id);setMessage(error?.message||'Product deleted.');await load();setBusy(false)}
+ async function addCategory(){const name=newCategory.trim();if(!name)return;setBusy(true);const {error}=await supabase.from('categories').insert({name,slug:slugify(name),sort_order:categories.length?Math.max(...categories.map(c=>c.sort_order))+1:1});setMessage(error?.message||'Category added.');if(!error)setNewCategory('');await load();setBusy(false)}
+ async function updateCategory(id:string){const name=editingCategoryName.trim();if(!name)return;setBusy(true);const {error}=await supabase.from('categories').update({name,slug:slugify(name)}).eq('id',id);setMessage(error?.message||'Category updated.');setEditingCategoryId(null);setEditingCategoryName('');await load();setBusy(false)}
+ async function removeCategory(id:string){if(!confirm('Delete this category?'))return;setBusy(true);const {error}=await supabase.from('categories').delete().eq('id',id);setMessage(error?.message||'Category deleted.');await load();setBusy(false)}
+ async function addChargeType(){const name=newChargeType.trim();if(!name)return;setBusy(true);const {error}=await supabase.from('other_charge_types').insert({name});setMessage(error?.message||'Charge type added.');if(!error)setNewChargeType('');await load();setBusy(false)}
+ async function saveSettings(e:FormEvent){e.preventDefault();if(!settings)return;setBusy(true);const {error}=await supabase.from('shop_settings').update({...settings,updated_at:new Date().toISOString()}).eq('id',1);setMessage(error?.message||'Shop details saved.');setBusy(false)}
+ async function signOut(){await supabase.auth.signOut();router.replace('/admin/login');router.refresh()}
+ if(!ready)return <main className="min-h-svh p-8 text-center">Loading owner dashboard…</main>;if(!authorized)return null
+ return <main className="min-h-svh bg-secondary/30 px-4 py-6 md:px-8"><div className="mx-auto max-w-6xl">
+  <header className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-background p-5"><div><p className="text-xs uppercase tracking-[.25em] text-gold">LEELA JEWELLERS</p><h1 className="font-serif text-3xl font-semibold text-primary">Owner Dashboard</h1></div><div className="flex gap-2"><button onClick={()=>router.push('/')} className="rounded-md border px-4 py-2 text-sm">View website</button><button onClick={signOut} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">Logout</button></div></header>
+  {message&&<div className="mb-4 rounded-md border bg-background px-4 py-3 text-sm">{message}</div>}
+  <section className="mb-6 rounded-2xl border bg-background p-5"><h2 className="font-serif text-2xl font-semibold text-primary">Shop Details</h2><form onSubmit={saveSettings} className="mt-4 grid gap-4 md:grid-cols-2">{settings&&<>{([['shop_name','Shop name'],['phone','Mobile number'],['whatsapp_number','WhatsApp number'],['address','Address'],['google_maps_url','Google Maps URL']] as const).map(([k,l])=><label key={k} className="text-sm font-medium">{l}<input className="mt-1 w-full rounded-md border px-3 py-2" value={(settings as any)[k]??''} onChange={e=>setSettings({...settings,[k]:e.target.value})}/></label>)}<label className="text-sm font-medium md:col-span-2">About<textarea className="mt-1 min-h-24 w-full rounded-md border px-3 py-2" value={settings.about??''} onChange={e=>setSettings({...settings,about:e.target.value})}/></label></>}<button disabled={busy} className="rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground md:w-fit">Save shop details</button></form></section>
+  <section className="mb-6 rounded-2xl border bg-background p-5"><p className="text-xs uppercase tracking-[.2em] text-gold">Market Rates</p><h2 className="font-serif text-2xl font-semibold text-primary">Daily Metal Rates</h2><div className="mt-4 grid gap-4 md:grid-cols-3">{([['gold_24k','Gold 24K'],['gold_22k','Gold 22K'],['silver','Silver']] as const).map(([k,l])=><label key={k} className="text-sm font-medium">{l} (₹/gram)<input type="number" min="0" step=".01" className="mt-1 w-full rounded-md border px-3 py-2" value={rates[k]} onChange={e=>setRates({...rates,[k]:e.target.value})}/></label>)}</div><button type="button" disabled={ratesBusy} onClick={saveRates} className="mt-4 rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">{ratesBusy?'Saving…':'Save metal rates'}</button></section>
+  <section className="mb-6 rounded-2xl border bg-background p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs uppercase tracking-[.2em] text-gold">Catalogue</p><h2 className="font-serif text-2xl font-semibold text-primary">Categories</h2></div><div className="flex gap-2"><input className="rounded-md border px-3 py-2 text-sm" placeholder="New category" value={newCategory} onChange={e=>setNewCategory(e.target.value)}/><button type="button" onClick={addCategory} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">Add</button></div></div><div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{categories.map(c=><div key={c.id} className="flex items-center justify-between gap-2 rounded-lg border p-3">{editingCategoryId===c.id?<><input className="min-w-0 flex-1 rounded border px-2 py-1 text-sm" value={editingCategoryName} onChange={e=>setEditingCategoryName(e.target.value)}/><button type="button" onClick={()=>updateCategory(c.id)} className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground">Save</button></>:<><span className="truncate text-sm font-medium">{c.name}</span><div className="flex gap-1"><button type="button" onClick={()=>{setEditingCategoryId(c.id);setEditingCategoryName(c.name)}} className="rounded border px-2 py-1 text-xs">Edit</button><button type="button" onClick={()=>removeCategory(c.id)} className="rounded border px-2 py-1 text-xs">Delete</button></div></>}</div>)}</div></section>
+  <section className="mb-6 rounded-2xl border bg-background p-5"><h2 className="font-serif text-2xl font-semibold text-primary">{product.id?'Edit Product':'Add Product'}</h2><form onSubmit={saveProduct} className="mt-4 space-y-6">
+   <div className="grid gap-4 md:grid-cols-2">{([['name','Product name'],['sku','SKU'],['purity','Purity']] as const).map(([k,l])=><label key={k} className="text-sm font-medium">{l}<input className="mt-1 w-full rounded-md border px-3 py-2" value={(product as any)[k]} onChange={e=>setProduct({...product,[k]:e.target.value})}/></label>)}<label className="text-sm font-medium">Category<select className="mt-1 w-full rounded-md border px-3 py-2" value={product.category_id} onChange={e=>setProduct({...product,category_id:e.target.value})}><option value="">Select category</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label className="text-sm font-medium md:col-span-2">Slug<input className="mt-1 w-full rounded-md border px-3 py-2" value={product.slug} onChange={e=>{setSlugManual(true);setAutoSlug(false);setProduct({...product,slug:e.target.value})}}/><span className="text-xs text-muted-foreground">{autoSlug?'Automatic':'Manual'}</span><button type="button" className="ml-2 rounded border px-2 py-1 text-xs" onClick={()=>{setSlugManual(false);setAutoSlug(true);setProduct(p=>({...p,slug:slugify(p.name)}))}}>Generate from name</button></label></div>
+   <section className="rounded-xl border p-4"><h3 className="font-serif text-xl font-semibold text-primary">Weight Details</h3><div className="mt-4 grid gap-4 md:grid-cols-3"><label className="text-sm">Gross Weight (GM)<input type="number" min="0" step=".001" className="mt-1 w-full rounded border px-3 py-2" value={pricing.gross} onChange={e=>setP('gross',e.target.value)}/></label><label className="text-sm">Total Stone Weight (GM)<input type="number" min="0" step=".001" disabled={pricing.stones.length>0} className="mt-1 w-full rounded border px-3 py-2" value={stoneW} onChange={e=>setP('stone',e.target.value)}/></label><div className="rounded border bg-secondary/30 p-3"><p className="text-xs text-muted-foreground">Net Metal Weight</p><p className="text-lg font-semibold">{net.toFixed(3)} GM</p></div></div></section>
+   <section className="rounded-xl border p-4"><h3 className="font-serif text-xl font-semibold text-primary">Making & Wastage</h3><div className="mt-4 grid gap-4 md:grid-cols-2"><div className="rounded border p-4"><p className="font-medium">Making Charges</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><input type="number" min="0" step=".01" placeholder="Value" className="rounded border px-3 py-2" value={pricing.making} onChange={e=>setP('making',e.target.value)}/><select className="rounded border px-3 py-2" value={pricing.makingType} onChange={e=>setP('makingType',e.target.value)}><option value="per_gram">₹ / Gram</option><option value="percent">% of Metal Value</option><option value="fixed">Fixed Amount</option></select>{pricing.makingType==='per_gram'&&<select className="rounded border px-3 py-2 sm:col-span-2" value={pricing.makingBasis} onChange={e=>setP('makingBasis',e.target.value)}><option value="net_weight">Net Weight</option><option value="gross_weight">Gross Weight</option></select>}</div><p className="mt-3 font-medium">Calculated: {money(making)}</p></div><div className="rounded border p-4"><p className="font-medium">Wastage / VA</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><input type="number" min="0" step=".01" placeholder="Value" className="rounded border px-3 py-2" value={pricing.wastage} onChange={e=>setP('wastage',e.target.value)}/><select className="rounded border px-3 py-2" value={pricing.wastageType} onChange={e=>setP('wastageType',e.target.value)}><option value="percent">Percent</option><option value="fixed">Fixed Amount</option></select>{pricing.wastageType==='percent'&&<select className="rounded border px-3 py-2 sm:col-span-2" value={pricing.wastageBasis} onChange={e=>setP('wastageBasis',e.target.value)}><option value="metal_value">Metal Value</option><option value="net_weight">Net Weight</option><option value="gross_weight">Gross Weight</option></select>}</div><p className="mt-3 font-medium">Calculated: {money(wastage)}</p></div></div></section>
+   <section className="rounded-xl border p-4"><div className="flex justify-between"><h3 className="font-serif text-xl font-semibold text-primary">Stone Charges</h3><button type="button" onClick={()=>setP('stones',[...pricing.stones,{id:uid(),name:'',size:'',quality:'',pcs:'1',price:'0',weight:'0'}])} className="rounded bg-primary px-3 py-2 text-sm text-primary-foreground">+ Add Stone</button></div>{pricing.stones.map((r,i)=><div key={r.id} className="mt-4 rounded border p-4"><div className="mb-2 flex justify-between"><b>Stone {i+1}</b><button type="button" onClick={()=>setP('stones',pricing.stones.filter(x=>x.id!==r.id))} className="rounded border px-2 py-1 text-xs">Remove</button></div><div className="grid gap-3 md:grid-cols-3">{([['name','Stone Name'],['size','Size'],['quality','Quality'],['pcs','Pcs'],['price','Price / Pc (₹)'],['weight','Stone Weight (GM)']] as const).map(([k,l])=><label key={k} className="text-sm">{l}<input type={['pcs','price','weight'].includes(k)?'number':'text'} min="0" step=".001" className="mt-1 w-full rounded border px-3 py-2" value={(r as any)[k]} onChange={e=>setP('stones',pricing.stones.map(x=>x.id===r.id?{...x,[k]:e.target.value}:x))}/></label>)}</div><p className="mt-2 text-right font-medium">Total: {money(n(r.pcs)*n(r.price))}</p></div>)}{pricing.stones.length>0&&<p className="mt-3 text-right font-semibold">Stone Total: {money(stoneTotal)}</p>}</section>
+   <section className="rounded-xl border p-4"><div className="flex flex-wrap justify-between gap-2"><h3 className="font-serif text-xl font-semibold text-primary">Other Charges</h3><button type="button" onClick={()=>setP('others',[...pricing.others,{id:uid(),type:chargeTypes[0]||'Other',description:'',qty:'1',price:'0'}])} className="rounded bg-primary px-3 py-2 text-sm text-primary-foreground">+ Add Other</button></div><div className="mt-3 flex gap-2"><input className="rounded border px-3 py-2 text-sm" placeholder="New charge type e.g. Polish" value={newChargeType} onChange={e=>setNewChargeType(e.target.value)}/><button type="button" onClick={addChargeType} className="rounded border px-3 py-2 text-sm">+ Add Charge Type</button></div>{pricing.others.map((r,i)=><div key={r.id} className="mt-4 rounded border p-4"><div className="mb-2 flex justify-between"><b>Other Charge {i+1}</b><button type="button" onClick={()=>setP('others',pricing.others.filter(x=>x.id!==r.id))} className="rounded border px-2 py-1 text-xs">Remove</button></div><div className="grid gap-3 md:grid-cols-4"><label className="text-sm">Charge For<select className="mt-1 w-full rounded border px-3 py-2" value={r.type} onChange={e=>setP('others',pricing.others.map(x=>x.id===r.id?{...x,type:e.target.value}:x))}>{chargeTypes.map(t=><option key={t}>{t}</option>)}</select></label><label className="text-sm">Description<input className="mt-1 w-full rounded border px-3 py-2" value={r.description} onChange={e=>setP('others',pricing.others.map(x=>x.id===r.id?{...x,description:e.target.value}:x))}/></label><label className="text-sm">Qty<input type="number" min="0" step=".01" className="mt-1 w-full rounded border px-3 py-2" value={r.qty} onChange={e=>setP('others',pricing.others.map(x=>x.id===r.id?{...x,qty:e.target.value}:x))}/></label><label className="text-sm">Price / Unit<input type="number" min="0" step=".01" className="mt-1 w-full rounded border px-3 py-2" value={r.price} onChange={e=>setP('others',pricing.others.map(x=>x.id===r.id?{...x,price:e.target.value}:x))}/></label></div><p className="mt-2 text-right font-medium">Total: {money(n(r.qty)*n(r.price))}</p></div>)}{pricing.others.length>0&&<p className="mt-3 text-right font-semibold">Other Total: {money(otherTotal)}</p>}</section>
+   <section className="rounded-xl border p-4"><div className="flex justify-between"><h3 className="font-serif text-xl font-semibold text-primary">Estimated Total</h3><label className="text-sm">GST %<input type="number" min="0" step=".01" className="ml-2 w-24 rounded border px-2 py-1" value={pricing.gst} onChange={e=>setP('gst',e.target.value)}/></label></div><div className="mt-4 space-y-2 text-sm"><div className="flex justify-between"><span>Net Metal Weight</span><span>{net.toFixed(3)} GM</span></div><div className="flex justify-between"><span>Metal Value</span><span>{money(metal)}</span></div><div className="flex justify-between"><span>Wastage / VA</span><span>{money(wastage)}</span></div><div className="flex justify-between"><span>Making Charges</span><span>{money(making)}</span></div><div className="flex justify-between"><span>Stone Charges</span><span>{money(stoneTotal)}</span></div><div className="flex justify-between"><span>Other Charges</span><span>{money(otherTotal)}</span></div><hr/><div className="flex justify-between font-semibold"><span>Subtotal</span><span>{money(subtotal)}</span></div><div className="flex justify-between"><span>GST</span><span>{money(gst)}</span></div><hr/><div className="flex justify-between text-lg font-bold text-primary"><span>Estimated Total</span><span>{money(total)}</span></div></div></section>
+   <label className="text-sm font-medium">Description<textarea className="mt-1 min-h-24 w-full rounded border px-3 py-2" value={product.description} onChange={e=>setProduct({...product,description:e.target.value})}/></label><div className="rounded-xl border border-dashed p-4"><label className="text-sm font-medium">Product photo</label><input className="mt-2 block w-full text-sm" type="file" accept="image/jpeg,image/png,image/webp,image/avif" onChange={chooseImage}/>{imagePreview&&<img src={imagePreview} alt="Selected product" className="mt-3 h-32 w-32 rounded-lg border object-cover"/>}</div><div className="flex gap-6"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={product.is_available} onChange={e=>setProduct({...product,is_available:e.target.checked})}/> Available</label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={product.is_featured} onChange={e=>setProduct({...product,is_featured:e.target.checked})}/> Featured</label></div><div className="flex gap-2"><button disabled={busy} className="rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">{busy?'Saving…':product.id?'Update product':'Add product'}</button>{product.id&&<button type="button" onClick={reset} className="rounded-md border px-4 py-2.5 text-sm">Cancel</button>}</div>
+  </form></section>
+  <section className="rounded-2xl border bg-background p-5"><h2 className="font-serif text-2xl font-semibold text-primary">Products</h2><div className="mt-4 space-y-3">{products.map(p=><div key={p.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"><div><p className="font-medium">{p.name}</p><p className="text-xs text-muted-foreground">{p.sku||'No SKU'} · Price on request</p></div><div className="flex gap-2"><button onClick={()=>editProduct(p)} className="rounded border px-3 py-1.5 text-sm">Edit</button><button onClick={()=>removeProduct(String(p.id))} className="rounded border px-3 py-1.5 text-sm">Delete</button></div></div>)}</div></section>
+ </div></main>
 }
