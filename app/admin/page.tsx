@@ -126,6 +126,12 @@ export default function AdminPage() {
   const [newChargeType, setNewChargeType] = useState('')
   const [popup, setPopup] = useState<Popup | null>(null)
 
+  // PRODUCT LIST CONTROLS
+  const [productSearch, setProductSearch] = useState('')
+  const [productCategoryFilter, setProductCategoryFilter] = useState('')
+  const [productStatusFilter, setProductStatusFilter] = useState('all')
+  const [productSort, setProductSort] = useState('newest')
+
   function showPopup(
     type: Popup['type'],
     title: string,
@@ -291,6 +297,66 @@ export default function AdminPage() {
     () => product.name.trim().length > 0,
     [product.name]
   )
+
+  // Filter + sort the products shown in the admin product list.
+  // This is only a frontend list control; it does not change the database.
+  const filteredProducts = useMemo(() => {
+    const search = productSearch.trim().toLowerCase()
+
+    const filtered = products.filter((p) => {
+      const matchesSearch = !search ||
+        [p.name, p.sku, p.purity, p.slug]
+          .filter(Boolean)
+          .some((value) =>
+            String(value).toLowerCase().includes(search)
+          )
+
+      const matchesCategory =
+        !productCategoryFilter ||
+        p.category_id === productCategoryFilter
+
+      const matchesStatus =
+        productStatusFilter === 'all' ||
+        (productStatusFilter === 'available' && p.is_available) ||
+        (productStatusFilter === 'unavailable' && !p.is_available) ||
+        (productStatusFilter === 'featured' && p.is_featured)
+
+      return matchesSearch && matchesCategory && matchesStatus
+    })
+
+    return [...filtered].sort((a, b) => {
+      switch (productSort) {
+        case 'name_asc':
+          return String(a.name ?? '').localeCompare(String(b.name ?? ''))
+        case 'name_desc':
+          return String(b.name ?? '').localeCompare(String(a.name ?? ''))
+        case 'price_asc':
+          return num(a.price) - num(b.price)
+        case 'price_desc':
+          return num(b.price) - num(a.price)
+        case 'weight_asc':
+          return num(a.weight) - num(b.weight)
+        case 'weight_desc':
+          return num(b.weight) - num(a.weight)
+        case 'newest':
+        default:
+          // load() already requests products newest-first.
+          return 0
+      }
+    })
+  }, [
+    products,
+    productSearch,
+    productCategoryFilter,
+    productStatusFilter,
+    productSort,
+  ])
+
+  const productFiltersActive =
+    Boolean(productSearch) ||
+    Boolean(productCategoryFilter) ||
+    productStatusFilter !== 'all' ||
+    productSort !== 'newest'
 
   const stoneWeightFromRows = useMemo(
     () =>
@@ -3182,63 +3248,181 @@ export default function AdminPage() {
           {/* PRODUCTS LIST */}
 
           <section className="rounded-2xl border border-border bg-background p-5">
-            <h2 className="font-serif text-2xl font-semibold text-primary">
-              Products
-            </h2>
-
-            <div className="mt-4 space-y-3">
-              {products.length ===
-                0 && (
-                <p className="text-sm text-muted-foreground">
-                  No products yet.
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-gold">
+                  Catalogue Management
                 </p>
-              )}
+                <h2 className="font-serif text-2xl font-semibold text-primary">
+                  Products
+                </h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Search, filter and sort your jewellery products quickly.
+                </p>
+              </div>
 
-              {products.map(p => (
-                <div
-                  key={p.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"
+              <p className="text-sm text-muted-foreground">
+                Showing <span className="font-semibold text-foreground">{filteredProducts.length}</span> of {products.length}
+              </p>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+              <label className="text-sm font-medium lg:col-span-2">
+                Search products
+                <input
+                  type="search"
+                  value={productSearch}
+                  onChange={e => setProductSearch(e.target.value)}
+                  placeholder="Search by name, SKU, purity or slug..."
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2"
+                />
+              </label>
+
+              <label className="text-sm font-medium">
+                Category
+                <select
+                  value={productCategoryFilter}
+                  onChange={e => setProductCategoryFilter(e.target.value)}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2"
                 >
-                  <div>
-                    <p className="font-medium">
-                      {p.name}
-                    </p>
+                  <option value="">All categories</option>
+                  {categories.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-                    <p className="text-xs text-muted-foreground">
-                      {p.sku ||
-                        'No SKU'}{' '}
-                      ·{' '}
-                      {p.price
-                        ? `₹${p.price}`
-                        : 'Price on request'}
-                    </p>
-                  </div>
+              <label className="text-sm font-medium">
+                Status
+                <select
+                  value={productStatusFilter}
+                  onChange={e => setProductStatusFilter(e.target.value)}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2"
+                >
+                  <option value="all">All products</option>
+                  <option value="available">Available</option>
+                  <option value="unavailable">Unavailable</option>
+                  <option value="featured">Featured</option>
+                </select>
+              </label>
 
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() =>
-                        editProduct(p)
-                      }
-                      className="rounded-md border px-3 py-1.5 text-sm"
-                    >
-                      Edit
-                    </button>
+              <label className="text-sm font-medium md:col-span-2 lg:col-span-3">
+                Sort by
+                <select
+                  value={productSort}
+                  onChange={e => setProductSort(e.target.value)}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2"
+                >
+                  <option value="newest">Newest first</option>
+                  <option value="name_asc">Name: A → Z</option>
+                  <option value="name_desc">Name: Z → A</option>
+                  <option value="price_asc">Price: Low → High</option>
+                  <option value="price_desc">Price: High → Low</option>
+                  <option value="weight_asc">Weight: Low → High</option>
+                  <option value="weight_desc">Weight: High → Low</option>
+                </select>
+              </label>
 
-                    <button
-                      onClick={() =>
-                        removeProduct(
-                          String(
-                            p.id
-                          )
-                        )
-                      }
-                      className="rounded-md border px-3 py-1.5 text-sm"
-                    >
-                      Delete
-                    </button>
-                  </div>
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProductSearch('')
+                    setProductCategoryFilter('')
+                    setProductStatusFilter('all')
+                    setProductSort('newest')
+                  }}
+                  disabled={!productFiltersActive}
+                  className="w-full rounded-md border px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Reset filters
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {products.length === 0 ? (
+                <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+                  No products yet. Add your first product above.
+                </p>
+              ) : filteredProducts.length === 0 ? (
+                <div className="rounded-xl border border-dashed p-6 text-center">
+                  <p className="font-medium">No matching products</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Try a different search or filter.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProductSearch('')
+                      setProductCategoryFilter('')
+                      setProductStatusFilter('all')
+                      setProductSort('newest')
+                    }}
+                    className="mt-3 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
+                  >
+                    Clear filters
+                  </button>
                 </div>
-              ))}
+              ) : (
+                filteredProducts.map(p => (
+                  <div
+                    key={p.id}
+                    className="flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium">
+                          {p.name}
+                        </p>
+                        {p.is_featured && (
+                          <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[11px] font-medium text-yellow-800">
+                            Featured
+                          </span>
+                        )}
+                        <span className={cn(
+                          'rounded-full px-2 py-0.5 text-[11px] font-medium',
+                          p.is_available
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-red-100 text-red-800'
+                        )}>
+                          {p.is_available ? 'Available' : 'Unavailable'}
+                        </span>
+                      </div>
+
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {p.sku || 'No SKU'} · {p.purity || 'Purity not set'} · {p.weight ? `${p.weight} GM` : 'Weight not set'}
+                      </p>
+
+                      <p className="mt-1 text-sm font-medium">
+                        {p.price != null && num(p.price) > 0
+                          ? money(num(p.price))
+                          : 'Price on request'}
+                      </p>
+                    </div>
+
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => editProduct(p)}
+                        className="rounded-md border px-3 py-1.5 text-sm hover:bg-secondary"
+                      >
+                        Edit
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => removeProduct(String(p.id))}
+                        className="rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </section>
 
