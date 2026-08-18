@@ -152,36 +152,11 @@ export async function generateMetadata({
     return { title: 'Product Not Found' }
   }
 
-  const productImage = product.product_images?.[0]?.public_url || undefined
-
   return {
     title: product.name,
     description:
       product.description ||
       `${product.name} at LEELA JEWELLERS, Jodhpur. Enquire on WhatsApp for today's price and availability.`,
-    openGraph: {
-      title: `${product.name} | LEELA JEWELLERS`,
-      description:
-        product.description ||
-        `${product.name} at LEELA JEWELLERS. Enquire on WhatsApp for today's price and availability.`,
-      type: 'website',
-      images: productImage
-        ? [
-            {
-              url: productImage,
-              alt: product.name,
-            },
-          ]
-        : [],
-    },
-    twitter: {
-      card: 'summary_large_image',
-      title: `${product.name} | LEELA JEWELLERS`,
-      description:
-        product.description ||
-        `${product.name} at LEELA JEWELLERS.`,
-      images: productImage ? [productImage] : [],
-    },
   }
 }
 
@@ -221,9 +196,13 @@ export default async function ProductDetailPage({
     gst_percent?: number | string | null
 
     pricing_details?: PricingDetails | null
+    stock_quantity?: number | string | null
   }
 
   const savedPricing = productData.pricing_details
+
+  const stockQuantity = num(productData.stock_quantity)
+  const isInStock = product.is_available && stockQuantity > 0
 
   /*
    * ============================================================
@@ -537,7 +516,7 @@ export default async function ProductDetailPage({
 
             <div>
 
-              <div className="relative aspect-[3/4] overflow-hidden rounded-2xl border border-border/70 bg-secondary">
+              <div className="relative aspect-square overflow-hidden rounded-2xl border border-border/70 bg-secondary">
 
                 {productImages.length > 0 ? (
 
@@ -583,7 +562,7 @@ export default async function ProductDetailPage({
                                   index === 0
                                 }
                                 sizes="(max-width: 768px) 100vw, 50vw"
-                                className="object-contain"
+                                className="object-cover"
                               />
                             </div>
 
@@ -639,7 +618,7 @@ export default async function ProductDetailPage({
                               }`}
                               fill
                               sizes="96px"
-                              className="object-contain p-1"
+                              className="object-cover"
                             />
 
                           </label>
@@ -1091,10 +1070,9 @@ export default async function ProductDetailPage({
 
               </div>
 
-              {!product.is_available && (
-                <p className="mt-3 text-sm text-muted-foreground">
-                  This product is currently unavailable.
-                  Please contact us for similar designs.
+              {!isInStock && (
+                <p className="mt-3 text-sm text-red-600">
+                  This product is currently out of stock. Please contact us for similar designs or availability.
                 </p>
               )}
 
