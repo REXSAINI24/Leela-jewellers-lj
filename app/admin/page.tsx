@@ -34,6 +34,8 @@ export default function AdminPage() {
   const [product, setProduct] = useState<typeof emptyProduct>(emptyProduct)
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false)
   const [autoSlug, setAutoSlug] = useState(true)
+  const [rates, setRates] = useState({ gold_24k: '', gold_22k: '', silver: '' })
+  const [ratesBusy, setRatesBusy] = useState(false)
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState('')
   const [message, setMessage] = useState('')
@@ -98,6 +100,14 @@ export default function AdminPage() {
   }
 
   useEffect(() => {
+    async function loadRates() {
+      const { data } = await supabase.from('metal_rates').select('gold_24k, gold_22k, silver').eq('id', 1).maybeSingle()
+      if (data) setRates({ gold_24k: data.gold_24k == null ? '' : String(data.gold_24k), gold_22k: data.gold_22k == null ? '' : String(data.gold_22k), silver: data.silver == null ? '' : String(data.silver) })
+    }
+    loadRates()
+  }, [])
+
+  useEffect(() => {
     if (autoSlug && !slugManuallyEdited) {
       setProduct(prev => ({
         ...prev,
@@ -105,6 +115,14 @@ export default function AdminPage() {
       }))
     }
   }, [product.name, autoSlug, slugManuallyEdited])
+
+  async function saveRates() {
+    setRatesBusy(true); setMessage('')
+    const payload = { id: 1, gold_24k: rates.gold_24k === '' ? null : Number(rates.gold_24k), gold_22k: rates.gold_22k === '' ? null : Number(rates.gold_22k), silver: rates.silver === '' ? null : Number(rates.silver), updated_at: new Date().toISOString() }
+    const { error } = await supabase.from('metal_rates').upsert(payload, { onConflict: 'id' })
+    setMessage(error ? `Could not save metal rates: ${error.message}` : 'Metal rates saved successfully.')
+    setRatesBusy(false)
+  }
 
   async function saveProduct(e: FormEvent) {
     e.preventDefault()
@@ -283,6 +301,25 @@ export default function AdminPage() {
           </form>
         </section>
 
+
+        <section className="mb-6 rounded-2xl border border-border bg-background p-5">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div><p className="text-xs uppercase tracking-[0.2em] text-gold">Market Rates</p><h2 className="font-serif text-2xl font-semibold text-primary">Daily Metal Rates</h2></div>
+            <p className="text-xs text-muted-foreground">Update whenever your shop's current rates change.</p>
+          </div>
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
+            <label className="text-sm font-medium">Gold 24K (₹/gram)
+              <input type="number" min="0" step="0.01" className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" value={rates.gold_24k} onChange={e=>setRates({...rates,gold_24k:e.target.value})} placeholder="e.g. 10000"/>
+            </label>
+            <label className="text-sm font-medium">Gold 22K (₹/gram)
+              <input type="number" min="0" step="0.01" className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" value={rates.gold_22k} onChange={e=>setRates({...rates,gold_22k:e.target.value})} placeholder="e.g. 9200"/>
+            </label>
+            <label className="text-sm font-medium">Silver (₹/gram)
+              <input type="number" min="0" step="0.01" className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2" value={rates.silver} onChange={e=>setRates({...rates,silver:e.target.value})} placeholder="e.g. 120"/>
+            </label>
+          </div>
+          <button type="button" disabled={ratesBusy} onClick={saveRates} className="mt-4 rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">{ratesBusy ? 'Saving…' : 'Save metal rates'}</button>
+        </section>
 
         <section className="mb-6 rounded-2xl border border-border bg-background p-5">
           <div className="flex flex-wrap items-end justify-between gap-3">
