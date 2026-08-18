@@ -128,3 +128,9 @@ export type ShopSettings = {
   about: string | null
   updated_at: string
 }
+export type MetalRates = {
+  gold_24k: number | null
+  gold_22k: number | null
+  silver: number | null
+  updated_at: string | null
+}
