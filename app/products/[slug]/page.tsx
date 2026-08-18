@@ -5,7 +5,10 @@ import { ArrowLeft, Gem } from 'lucide-react'
 import { notFound } from 'next/navigation'
 import { SiteHeader } from '@/components/site-header'
 import { SiteFooter } from '@/components/site-footer'
-import { FloatingWhatsApp, WhatsAppButton } from '@/components/whatsapp-button'
+import {
+  FloatingWhatsApp,
+  WhatsAppButton,
+} from '@/components/whatsapp-button'
 import {
   getCategories,
   getProductBySlug,
@@ -100,9 +103,7 @@ async function getMetalRates() {
  * OLD PRODUCTS SUPPORT
  *
  * Agar kisi purane product me pricing_details nahi hai,
- * to hum purani Supabase tables se charges read kar lenge.
- *
- * New products ke liye main calculation pricing_details se hogi.
+ * to purani Supabase tables se charges read honge.
  */
 async function getLegacyProductCharges(productId: string) {
   const supabase = await createClient()
@@ -174,10 +175,11 @@ export default async function ProductDetailPage({
   if (!product) notFound()
 
   /*
+   * ============================================================
    * PRODUCT DATA
-   *
-   * pricing_details Admin Panel me save hota hai.
+   * ============================================================
    */
+
   const productData = product as typeof product & {
     gross_weight?: number | string | null
     stone_weight?: number | string | null
@@ -199,17 +201,31 @@ export default async function ProductDetailPage({
   const savedPricing = productData.pricing_details
 
   /*
+   * ============================================================
    * OLD PRODUCT CHARGES
-   *
-   * Sirf tab use honge jab pricing_details available
-   * nahi ho ya usme rows save na hui ho.
+   * ============================================================
    */
+
   const legacyCharges =
     savedPricing
       ? { stones: [], others: [] }
       : await getLegacyProductCharges(String(product.id))
 
-  const image = product.product_images?.[0]
+  /*
+   * ============================================================
+   * PRODUCT IMAGE GALLERY
+   *
+   * Supabase se product ki saari uploaded images yahan milengi.
+   * sort_order ke according images arrange hongi.
+   * ============================================================
+   */
+
+  const productImages = [...(product.product_images ?? [])]
+    .filter((item) => item?.public_url)
+    .sort(
+      (a, b) =>
+        num(a.sort_order) - num(b.sort_order)
+    )
 
   /*
    * ============================================================
@@ -225,7 +241,9 @@ export default async function ProductDetailPage({
     ? savedPricing.stones
     : []
 
-  const savedOtherRows = Array.isArray(savedPricing?.other_charges)
+  const savedOtherRows = Array.isArray(
+    savedPricing?.other_charges
+  )
     ? savedPricing.other_charges
     : []
 
@@ -250,7 +268,10 @@ export default async function ProductDetailPage({
   const netMetalWeight =
     savedNetWeight > 0
       ? savedNetWeight
-      : Math.max(grossWeight - totalStoneWeight, 0)
+      : Math.max(
+          grossWeight - totalStoneWeight,
+          0
+        )
 
   /*
    * ============================================================
@@ -293,8 +314,6 @@ export default async function ProductDetailPage({
   /*
    * ============================================================
    * MAKING CHARGES
-   *
-   * EXACT SAME LOGIC AS ADMIN PANEL
    * ============================================================
    */
 
@@ -302,13 +321,15 @@ export default async function ProductDetailPage({
     ? num(savedPricing.making_value)
     : num(productData.making_value)
 
-  const makingType = savedPricing?.making_type
-    ?? productData.making_type
-    ?? 'per_gram'
+  const makingType =
+    savedPricing?.making_type ??
+    productData.making_type ??
+    'per_gram'
 
-  const makingBasis = savedPricing?.making_basis
-    ?? productData.making_basis
-    ?? 'net_weight'
+  const makingBasis =
+    savedPricing?.making_basis ??
+    productData.making_basis ??
+    'net_weight'
 
   let makingCharges = 0
 
@@ -316,17 +337,9 @@ export default async function ProductDetailPage({
     if (makingType === 'fixed') {
       makingCharges = makingValue
     } else if (makingType === 'percent') {
-      /*
-       * Admin:
-       * percent = metalValue × percentage
-       */
       makingCharges =
         metalValue * makingValue / 100
     } else {
-      /*
-       * Admin:
-       * per gram × selected weight basis
-       */
       const basisWeight =
         makingBasis === 'gross_weight'
           ? grossWeight
@@ -340,8 +353,6 @@ export default async function ProductDetailPage({
   /*
    * ============================================================
    * WASTAGE / VA
-   *
-   * EXACT SAME LOGIC AS ADMIN PANEL
    * ============================================================
    */
 
@@ -349,21 +360,20 @@ export default async function ProductDetailPage({
     ? num(savedPricing.wastage_value)
     : num(productData.wastage_value)
 
-  const wastageType = savedPricing?.wastage_type
-    ?? productData.wastage_type
-    ?? 'percent'
+  const wastageType =
+    savedPricing?.wastage_type ??
+    productData.wastage_type ??
+    'percent'
 
-  const wastageBasis = savedPricing?.wastage_basis
-    ?? productData.wastage_basis
-    ?? 'metal_value'
+  const wastageBasis =
+    savedPricing?.wastage_basis ??
+    productData.wastage_basis ??
+    'metal_value'
 
   let wastageCharges = 0
 
   if (wastageValue > 0) {
     if (wastageType === 'fixed') {
-      /*
-       * Admin Panel me fixed wastage direct amount hai.
-       */
       wastageCharges = wastageValue
     } else {
       let basis = metalValue
@@ -390,23 +400,27 @@ export default async function ProductDetailPage({
   const stoneRows =
     savedStoneRows.length > 0
       ? savedStoneRows
-      : legacyCharges.stones.map(stone => ({
-          id: stone.id,
-          stone_name: stone.stone_name ?? '',
-          size: stone.size ?? '',
-          quality: stone.quality ?? '',
-          pcs: stone.pcs ?? 0,
-          price_per_pc: stone.price_per_pc ?? 0,
-          weight: stone.weight ?? 0,
-        }))
+      : legacyCharges.stones.map(
+          (stone) => ({
+            id: stone.id,
+            stone_name: stone.stone_name ?? '',
+            size: stone.size ?? '',
+            quality: stone.quality ?? '',
+            pcs: stone.pcs ?? 0,
+            price_per_pc:
+              stone.price_per_pc ?? 0,
+            weight: stone.weight ?? 0,
+          })
+        )
 
-  const stoneCharges = stoneRows.reduce(
-    (sum, stone) =>
-      sum +
-      num(stone.pcs) *
-        num(stone.price_per_pc),
-    0
-  )
+  const stoneCharges =
+    stoneRows.reduce(
+      (sum, stone) =>
+        sum +
+        num(stone.pcs) *
+          num(stone.price_per_pc),
+      0
+    )
 
   /*
    * ============================================================
@@ -417,21 +431,28 @@ export default async function ProductDetailPage({
   const otherRows =
     savedOtherRows.length > 0
       ? savedOtherRows
-      : legacyCharges.others.map(charge => ({
-          id: charge.id,
-          charge_type: charge.charge_type ?? 'Other',
-          description: charge.description ?? '',
-          quantity: charge.quantity ?? 0,
-          price_per_unit: charge.price_per_unit ?? 0,
-        }))
+      : legacyCharges.others.map(
+          (charge) => ({
+            id: charge.id,
+            charge_type:
+              charge.charge_type ?? 'Other',
+            description:
+              charge.description ?? '',
+            quantity:
+              charge.quantity ?? 0,
+            price_per_unit:
+              charge.price_per_unit ?? 0,
+          })
+        )
 
-  const otherCharges = otherRows.reduce(
-    (sum, charge) =>
-      sum +
-      num(charge.quantity) *
-        num(charge.price_per_unit),
-    0
-  )
+  const otherCharges =
+    otherRows.reduce(
+      (sum, charge) =>
+        sum +
+        num(charge.quantity) *
+          num(charge.price_per_unit),
+      0
+    )
 
   /*
    * ============================================================
@@ -451,10 +472,14 @@ export default async function ProductDetailPage({
     : num(productData.gst_percent ?? 3)
 
   const finalGstPercent =
-    gstPercent > 0 ? gstPercent : 3
+    gstPercent > 0
+      ? gstPercent
+      : 3
 
   const gst =
-    subtotal * finalGstPercent / 100
+    subtotal *
+    finalGstPercent /
+    100
 
   const estimatedTotal =
     subtotal + gst
@@ -482,24 +507,130 @@ export default async function ProductDetailPage({
           <div className="mt-6 grid gap-8 md:grid-cols-2 md:gap-12">
 
             {/* ==================================================
-                PRODUCT IMAGE
+                PRODUCT IMAGE GALLERY
             ================================================== */}
 
-            <div className="relative aspect-square overflow-hidden rounded-2xl border border-border/70 bg-secondary">
+            <div>
 
-              {image?.public_url ? (
-                <Image
-                  src={image.public_url}
-                  alt={product.name}
-                  fill
-                  priority
-                  sizes="(max-width: 768px) 100vw, 50vw"
-                  className="object-cover"
-                />
-              ) : (
-                <div className="flex h-full items-center justify-center text-muted-foreground/50">
-                  <Gem className="size-16" />
+              <div className="relative aspect-square overflow-hidden rounded-2xl border border-border/70 bg-secondary">
+
+                {productImages.length > 0 ? (
+
+                  <>
+                    {productImages.map(
+                      (item, index) => {
+                        const radioId =
+                          `product-image-${String(
+                            product.id
+                          )}-${index}`
+
+                        return (
+                          <div
+                            key={
+                              item.id ??
+                              `${product.id}-${index}`
+                            }
+                            className="absolute inset-0"
+                          >
+
+                            <input
+                              id={radioId}
+                              type="radio"
+                              name={`product-gallery-${String(
+                                product.id
+                              )}`}
+                              defaultChecked={
+                                index === 0
+                              }
+                              className="peer sr-only"
+                            />
+
+                            <div className="hidden h-full w-full peer-checked:block">
+                              <Image
+                                src={
+                                  item.public_url
+                                }
+                                alt={`${product.name} - Image ${
+                                  index + 1
+                                }`}
+                                fill
+                                priority={
+                                  index === 0
+                                }
+                                sizes="(max-width: 768px) 100vw, 50vw"
+                                className="object-cover"
+                              />
+                            </div>
+
+                          </div>
+                        )
+                      }
+                    )}
+                  </>
+
+                ) : (
+
+                  <div className="flex h-full items-center justify-center text-muted-foreground/50">
+                    <Gem className="size-16" />
+                  </div>
+
+                )}
+
+              </div>
+
+              {/* ==================================================
+                  THUMBNAILS
+              ================================================== */}
+
+              {productImages.length > 1 && (
+
+                <div className="mt-4">
+
+                  <div className="flex gap-3 overflow-x-auto pb-2">
+
+                    {productImages.map(
+                      (item, index) => {
+                        const radioId =
+                          `product-image-${String(
+                            product.id
+                          )}-${index}`
+
+                        return (
+                          <label
+                            key={
+                              item.id ??
+                              `thumbnail-${product.id}-${index}`
+                            }
+                            htmlFor={radioId}
+                            className="relative block size-20 shrink-0 cursor-pointer overflow-hidden rounded-xl border border-border/70 bg-secondary transition-all hover:border-primary md:size-24"
+                          >
+
+                            <Image
+                              src={
+                                item.public_url
+                              }
+                              alt={`${product.name} thumbnail ${
+                                index + 1
+                              }`}
+                              fill
+                              sizes="96px"
+                              className="object-cover"
+                            />
+
+                          </label>
+                        )
+                      }
+                    )}
+
+                  </div>
+
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {productImages.length}{' '}
+                    photos available · Tap a photo to view
+                  </p>
+
                 </div>
+
               )}
 
             </div>
@@ -592,7 +723,8 @@ export default async function ProductDetailPage({
                     Today&apos;s{' '}
                     {isSilver
                       ? 'Silver'
-                      : product.purity || 'Gold'}{' '}
+                      : product.purity ||
+                        'Gold'}{' '}
                     rate:{' '}
 
                     <span className="font-medium text-foreground">
@@ -603,19 +735,18 @@ export default async function ProductDetailPage({
 
                 <div className="mt-5 space-y-3 text-sm">
 
-                  {/* NET WEIGHT */}
-
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">
                       Net Metal Weight
                     </span>
 
                     <span className="font-medium">
-                      {netMetalWeight.toFixed(3)} GM
+                      {netMetalWeight.toFixed(
+                        3
+                      )}{' '}
+                      GM
                     </span>
                   </div>
-
-                  {/* METAL RATE */}
 
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">
@@ -623,11 +754,10 @@ export default async function ProductDetailPage({
                     </span>
 
                     <span className="font-medium">
-                      {money(currentRate)} / GM
+                      {money(currentRate)} /
+                      GM
                     </span>
                   </div>
-
-                  {/* METAL VALUE */}
 
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">
@@ -639,8 +769,6 @@ export default async function ProductDetailPage({
                     </span>
                   </div>
 
-                  {/* WASTAGE */}
-
                   {wastageCharges > 0 && (
                     <div className="flex justify-between gap-4">
                       <span className="text-muted-foreground">
@@ -648,12 +776,12 @@ export default async function ProductDetailPage({
                       </span>
 
                       <span className="font-medium">
-                        {money(wastageCharges)}
+                        {money(
+                          wastageCharges
+                        )}
                       </span>
                     </div>
                   )}
-
-                  {/* MAKING */}
 
                   {makingCharges > 0 && (
                     <div className="flex justify-between gap-4">
@@ -662,12 +790,12 @@ export default async function ProductDetailPage({
                       </span>
 
                       <span className="font-medium">
-                        {money(makingCharges)}
+                        {money(
+                          makingCharges
+                        )}
                       </span>
                     </div>
                   )}
-
-                  {/* STONE */}
 
                   {stoneCharges > 0 && (
                     <div className="flex justify-between gap-4">
@@ -676,12 +804,12 @@ export default async function ProductDetailPage({
                       </span>
 
                       <span className="font-medium">
-                        {money(stoneCharges)}
+                        {money(
+                          stoneCharges
+                        )}
                       </span>
                     </div>
                   )}
-
-                  {/* OTHER */}
 
                   {otherCharges > 0 && (
                     <div className="flex justify-between gap-4">
@@ -690,14 +818,14 @@ export default async function ProductDetailPage({
                       </span>
 
                       <span className="font-medium">
-                        {money(otherCharges)}
+                        {money(
+                          otherCharges
+                        )}
                       </span>
                     </div>
                   )}
 
                   <div className="my-2 border-t border-border/70" />
-
-                  {/* SUBTOTAL */}
 
                   <div className="flex justify-between gap-4">
                     <span className="font-medium">
@@ -708,8 +836,6 @@ export default async function ProductDetailPage({
                       {money(subtotal)}
                     </span>
                   </div>
-
-                  {/* GST */}
 
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">
@@ -723,8 +849,6 @@ export default async function ProductDetailPage({
 
                   <div className="my-2 border-t border-border/70" />
 
-                  {/* FINAL TOTAL */}
-
                   <div className="flex items-center justify-between gap-4 rounded-xl bg-primary p-4 text-primary-foreground">
 
                     <span className="font-medium">
@@ -732,7 +856,9 @@ export default async function ProductDetailPage({
                     </span>
 
                     <span className="font-serif text-xl font-semibold">
-                      {money(estimatedTotal)}
+                      {money(
+                        estimatedTotal
+                      )}
                     </span>
 
                   </div>
@@ -753,59 +879,77 @@ export default async function ProductDetailPage({
 
                   <div className="mt-3 space-y-2">
 
-                    {stoneRows.map((stone) => {
+                    {stoneRows.map(
+                      (stone) => {
+                        const rowTotal =
+                          num(stone.pcs) *
+                          num(
+                            stone.price_per_pc
+                          )
 
-                      const rowTotal =
-                        num(stone.pcs) *
-                        num(stone.price_per_pc)
+                        return (
+                          <div
+                            key={stone.id}
+                            className="rounded-xl border border-border/70 p-4"
+                          >
 
-                      return (
-                        <div
-                          key={stone.id}
-                          className="rounded-xl border border-border/70 p-4"
-                        >
+                            <div className="flex items-start justify-between gap-4">
 
-                          <div className="flex items-start justify-between gap-4">
+                              <div>
 
-                            <div>
-
-                              {stone.stone_name && (
-                                <p className="font-medium">
-                                  {stone.stone_name}
-                                </p>
-                              )}
-
-                              <div className="mt-1 text-xs text-muted-foreground">
-
-                                {stone.size && (
-                                  <span>
-                                    Size: {stone.size} ·{' '}
-                                  </span>
+                                {stone.stone_name && (
+                                  <p className="font-medium">
+                                    {
+                                      stone.stone_name
+                                    }
+                                  </p>
                                 )}
 
-                                {stone.quality && (
-                                  <span>
-                                    Quality: {stone.quality} ·{' '}
-                                  </span>
-                                )}
+                                <div className="mt-1 text-xs text-muted-foreground">
 
-                                <span>
-                                  {num(stone.pcs)} PC
-                                </span>
+                                  {stone.size && (
+                                    <span>
+                                      Size:{' '}
+                                      {
+                                        stone.size
+                                      }{' '}
+                                      ·{' '}
+                                    </span>
+                                  )}
+
+                                  {stone.quality && (
+                                    <span>
+                                      Quality:{' '}
+                                      {
+                                        stone.quality
+                                      }{' '}
+                                      ·{' '}
+                                    </span>
+                                  )}
+
+                                  <span>
+                                    {num(
+                                      stone.pcs
+                                    )}{' '}
+                                    PC
+                                  </span>
+
+                                </div>
 
                               </div>
 
+                              <p className="font-medium">
+                                {money(
+                                  rowTotal
+                                )}
+                              </p>
+
                             </div>
 
-                            <p className="font-medium">
-                              {money(rowTotal)}
-                            </p>
-
                           </div>
-
-                        </div>
-                      )
-                    })}
+                        )
+                      }
+                    )}
 
                   </div>
 
@@ -813,7 +957,7 @@ export default async function ProductDetailPage({
               )}
 
               {/* ==================================================
-                  OTHER CHARGES DETAILS
+                  OTHER CHARGES
               ================================================== */}
 
               {otherRows.length > 0 && (
@@ -825,43 +969,56 @@ export default async function ProductDetailPage({
 
                   <div className="mt-3 space-y-2">
 
-                    {otherRows.map((charge) => {
+                    {otherRows.map(
+                      (charge) => {
+                        const rowTotal =
+                          num(
+                            charge.quantity
+                          ) *
+                          num(
+                            charge.price_per_unit
+                          )
 
-                      const rowTotal =
-                        num(charge.quantity) *
-                        num(charge.price_per_unit)
+                        return (
+                          <div
+                            key={charge.id}
+                            className="flex items-center justify-between gap-4 rounded-xl border border-border/70 p-4"
+                          >
 
-                      return (
-                        <div
-                          key={charge.id}
-                          className="flex items-center justify-between gap-4 rounded-xl border border-border/70 p-4"
-                        >
+                            <div>
 
-                          <div>
+                              <p className="font-medium">
+                                {charge.charge_type ||
+                                  'Other'}
+                              </p>
+
+                              {charge.description && (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {
+                                    charge.description
+                                  }
+                                </p>
+                              )}
+
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Qty:{' '}
+                                {num(
+                                  charge.quantity
+                                )}
+                              </p>
+
+                            </div>
 
                             <p className="font-medium">
-                              {charge.charge_type || 'Other'}
-                            </p>
-
-                            {charge.description && (
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                {charge.description}
-                              </p>
-                            )}
-
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              Qty: {num(charge.quantity)}
+                              {money(
+                                rowTotal
+                              )}
                             </p>
 
                           </div>
-
-                          <p className="font-medium">
-                            {money(rowTotal)}
-                          </p>
-
-                        </div>
-                      )
-                    })}
+                        )
+                      }
+                    )}
 
                   </div>
 
@@ -880,7 +1037,9 @@ export default async function ProductDetailPage({
                   </h2>
 
                   <p className="mt-2 whitespace-pre-line text-sm leading-7 text-muted-foreground">
-                    {product.description}
+                    {
+                      product.description
+                    }
                   </p>
 
                 </div>
@@ -893,8 +1052,12 @@ export default async function ProductDetailPage({
               <div className="mt-7">
 
                 <WhatsAppButton
-                  whatsappNumber={settings.whatsapp_number}
-                  shopName={settings.shop_name}
+                  whatsappNumber={
+                    settings.whatsapp_number
+                  }
+                  shopName={
+                    settings.shop_name
+                  }
                   product={product}
                   size="lg"
                   className="w-full sm:w-auto"
@@ -905,8 +1068,8 @@ export default async function ProductDetailPage({
 
               {!product.is_available && (
                 <p className="mt-3 text-sm text-muted-foreground">
-                  This product is currently unavailable. Please contact us for
-                  similar designs.
+                  This product is currently unavailable.
+                  Please contact us for similar designs.
                 </p>
               )}
 
@@ -921,8 +1084,12 @@ export default async function ProductDetailPage({
       />
 
       <FloatingWhatsApp
-        whatsappNumber={settings.whatsapp_number}
-        shopName={settings.shop_name}
+        whatsappNumber={
+          settings.whatsapp_number
+        }
+        shopName={
+          settings.shop_name
+        }
       />
 
     </div>
