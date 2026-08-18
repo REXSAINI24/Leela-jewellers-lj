@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import Image from 'next/image'
-import { Gem } from 'lucide-react'
+import { Gem, ArrowRight } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { formatPrice } from '@/lib/format'
 import type { ProductWithRelations } from '@/lib/types'
@@ -111,11 +111,24 @@ export function ProductCard({
               <span className="text-base font-semibold text-primary">
                 {price}
               </span>
+
+              {/* VIEW DETAILS */}
+              <div className="mt-2 flex items-center gap-1 text-xs font-medium text-primary transition-all group-hover:gap-2">
+                View Details
+                <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+              </div>
             </div>
           ) : (
-            <span className="text-sm font-medium text-muted-foreground">
-              Enquire for price
-            </span>
+            <div>
+              <span className="text-sm font-medium text-muted-foreground">
+                Enquire for price
+              </span>
+
+              <div className="mt-2 flex items-center gap-1 text-xs font-medium text-primary transition-all group-hover:gap-2">
+                View Details
+                <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+              </div>
+            </div>
           )}
         </div>
       </div>
