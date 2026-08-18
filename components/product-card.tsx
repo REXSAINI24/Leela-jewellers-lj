@@ -10,29 +10,34 @@ export function ProductCard({
 }: {
   product: ProductWithRelations
 }) {
-  const image = product.product_images[0]
+  const image = product.product_images?.[0]
+
   const price = formatPrice(product.price)
 
-  const weight = product.weight
-    ? `${product.weight} GM`
-    : null
+  const weight =
+    product.weight && Number(product.weight) > 0
+      ? `${product.weight} GM`
+      : null
 
-  const purity = product.purity || null
+  const purity = product.purity?.trim() || null
 
-  const rate = product.rate
-    ? formatPrice(product.rate)
-    : null
+  const rate =
+    product.rate && Number(product.rate) > 0
+      ? formatPrice(product.rate)
+      : null
+
+  const category = product.categories?.name || null
 
   return (
     <Link
       href={`/products/${product.slug}`}
-      className="group flex flex-col overflow-hidden rounded-xl border border-border/70 bg-card transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+      className="group flex h-full flex-col overflow-hidden rounded-xl border border-border/70 bg-card transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
     >
       {/* PRODUCT IMAGE */}
       <div className="relative aspect-square overflow-hidden bg-secondary">
-        {image ? (
+        {image?.public_url ? (
           <Image
-            src={image.public_url || '/placeholder.svg'}
+            src={image.public_url}
             alt={product.name}
             fill
             sizes="(max-width: 768px) 50vw, 25vw"
@@ -54,22 +59,22 @@ export function ProductCard({
         )}
       </div>
 
-      {/* PRODUCT INFO */}
+      {/* PRODUCT INFORMATION */}
       <div className="flex flex-1 flex-col p-3">
-        {/* Category */}
-        {product.categories && (
+        {/* CATEGORY */}
+        {category && (
           <span className="text-[10px] uppercase tracking-[0.18em] text-gold">
-            {product.categories.name}
+            {category}
           </span>
         )}
 
-        {/* Name */}
+        {/* PRODUCT NAME */}
         <h3 className="mt-1 line-clamp-2 font-serif text-base font-medium leading-snug text-foreground">
           {product.name}
         </h3>
 
-        {/* Weight + Purity */}
-        {(weight || purity) && (
+        {/* PURITY + WEIGHT */}
+        {(purity || weight) && (
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
             {purity && (
               <span className="rounded-md bg-secondary px-2 py-1">
