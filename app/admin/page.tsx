@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { Category, Product, ShopSettings } from '@/lib/types'
 import { slugify } from '@/lib/format'
+import { cn } from '@/lib/utils'
 
 type StoneRow = {
   id: string
