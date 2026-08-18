@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import Image from 'next/image'
-import { Gem, ArrowRight } from 'lucide-react'
+import { Gem } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { formatPrice } from '@/lib/format'
 import type { ProductWithRelations } from '@/lib/types'
@@ -10,34 +10,34 @@ export function ProductCard({
 }: {
   product: ProductWithRelations
 }) {
-  const image = product.product_images?.[0]
-
+  const image = product.product_images[0]
   const price = formatPrice(product.price)
 
-  const weight =
-    product.weight && Number(product.weight) > 0
-      ? `${product.weight} GM`
-      : null
+  const weight = product.weight
+    ? `${product.weight} GM`
+    : null
 
-  const purity = product.purity?.trim() || null
+  const purity = product.purity || null
 
-  const rate =
-    product.rate && Number(product.rate) > 0
-      ? formatPrice(product.rate)
-      : null
+  const rate = product.rate
+    ? formatPrice(product.rate)
+    : null
 
-  const category = product.categories?.name || null
+  const stockQuantity = Number(product.stock_quantity ?? 0)
+
+  const isInStock =
+    product.is_available && stockQuantity > 0
 
   return (
     <Link
       href={`/products/${product.slug}`}
-      className="group flex h-full flex-col overflow-hidden rounded-xl border border-border/70 bg-card transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+      className="group flex flex-col overflow-hidden rounded-xl border border-border/70 bg-card transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
     >
       {/* PRODUCT IMAGE */}
       <div className="relative aspect-square overflow-hidden bg-secondary">
-        {image?.public_url ? (
+        {image ? (
           <Image
-            src={image.public_url}
+            src={image.public_url || '/placeholder.svg'}
             alt={product.name}
             fill
             sizes="(max-width: 768px) 50vw, 25vw"
@@ -49,7 +49,8 @@ export function ProductCard({
           </div>
         )}
 
-        {!product.is_available && (
+        {/* STOCK STATUS */}
+        {!isInStock && (
           <Badge
             variant="secondary"
             className="absolute left-2 top-2 bg-background/90 text-foreground"
@@ -59,22 +60,23 @@ export function ProductCard({
         )}
       </div>
 
-      {/* PRODUCT INFORMATION */}
+      {/* PRODUCT INFO */}
       <div className="flex flex-1 flex-col p-3">
+
         {/* CATEGORY */}
-        {category && (
+        {product.categories && (
           <span className="text-[10px] uppercase tracking-[0.18em] text-gold">
-            {category}
+            {product.categories.name}
           </span>
         )}
 
-        {/* PRODUCT NAME */}
+        {/* NAME */}
         <h3 className="mt-1 line-clamp-2 font-serif text-base font-medium leading-snug text-foreground">
           {product.name}
         </h3>
 
-        {/* PURITY + WEIGHT */}
-        {(purity || weight) && (
+        {/* WEIGHT + PURITY */}
+        {(weight || purity) && (
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
             {purity && (
               <span className="rounded-md bg-secondary px-2 py-1">
@@ -100,6 +102,19 @@ export function ProductCard({
           </div>
         )}
 
+        {/* STOCK QUANTITY */}
+        <div className="mt-2">
+          {isInStock ? (
+            <span className="text-[11px] font-medium text-green-600">
+              Available · {stockQuantity} PCS
+            </span>
+          ) : (
+            <span className="text-[11px] font-medium text-red-600">
+              Out of Stock
+            </span>
+          )}
+        </div>
+
         {/* PRICE */}
         <div className="mt-auto pt-3">
           {price ? (
@@ -111,26 +126,14 @@ export function ProductCard({
               <span className="text-base font-semibold text-primary">
                 {price}
               </span>
-
-              {/* VIEW DETAILS */}
-              <div className="mt-2 flex items-center gap-1 text-xs font-medium text-primary transition-all group-hover:gap-2">
-                View Details
-                <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
-              </div>
             </div>
           ) : (
-            <div>
-              <span className="text-sm font-medium text-muted-foreground">
-                Enquire for price
-              </span>
-
-              <div className="mt-2 flex items-center gap-1 text-xs font-medium text-primary transition-all group-hover:gap-2">
-                View Details
-                <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
-              </div>
-            </div>
+            <span className="text-sm font-medium text-muted-foreground">
+              Enquire for price
+            </span>
           )}
         </div>
+
       </div>
     </Link>
   )
