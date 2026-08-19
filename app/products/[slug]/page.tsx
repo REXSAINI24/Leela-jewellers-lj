@@ -220,45 +220,10 @@ export default async function ProductDetailPage({
 
     gst_percent?: number | string | null
 
-    // Optional inventory field. If your products table has this column,
-    // it will control the stock badge automatically. If not, the page
-    // safely falls back to the existing is_available flag.
-    stock_quantity?: number | string | null
-
     pricing_details?: PricingDetails | null
   }
 
   const savedPricing = productData.pricing_details
-
-  /*
-   * ============================================================
-   * INVENTORY / AVAILABILITY
-   *
-   * If stock_quantity exists in the products table, it becomes the
-   * source of truth for stock status. Otherwise we keep backward
-   * compatibility with the existing is_available flag.
-   * ============================================================
-   */
-
-  const rawStockQuantity = productData.stock_quantity
-
-  const hasStockTracking =
-    rawStockQuantity !== null &&
-    rawStockQuantity !== undefined &&
-    String(rawStockQuantity).trim() !== ''
-
-  const stockQuantity = hasStockTracking
-    ? Math.max(0, Math.floor(num(rawStockQuantity)))
-    : null
-
-  const isOutOfStock = hasStockTracking
-    ? stockQuantity === 0
-    : !product.is_available
-
-  const isLowStock =
-    stockQuantity !== null &&
-    stockQuantity > 0 &&
-    stockQuantity <= 3
 
   /*
    * ============================================================
@@ -360,7 +325,7 @@ export default async function ProductDetailPage({
           ? num(rates?.gold_22k)
           : isGold
             ? num(rates?.gold_22k)
-            : num(product.rate)
+            : 0
 
   /*
    * ============================================================
@@ -712,33 +677,6 @@ export default async function ProductDetailPage({
               </h1>
 
               {/* ==================================================
-                  AVAILABILITY / STOCK STATUS
-              ================================================== */}
-              <div className="mt-4">
-                {isOutOfStock ? (
-                  <div className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700">
-                    <span className="size-2 rounded-full bg-red-500" />
-                    Out of Stock
-                  </div>
-                ) : isLowStock ? (
-                  <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-700">
-                    <span className="size-2 rounded-full bg-amber-500" />
-                    Only {stockQuantity} {stockQuantity === 1 ? 'piece' : 'pieces'} left
-                  </div>
-                ) : stockQuantity !== null ? (
-                  <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700">
-                    <span className="size-2 rounded-full bg-emerald-500" />
-                    In Stock · {stockQuantity} pieces available
-                  </div>
-                ) : product.is_available ? (
-                  <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700">
-                    <span className="size-2 rounded-full bg-emerald-500" />
-                    Available
-                  </div>
-                ) : null}
-              </div>
-
-              {/* ==================================================
                   WEIGHT DETAILS
               ================================================== */}
 
@@ -798,159 +736,164 @@ export default async function ProductDetailPage({
               {/* ==================================================
                   PRICE CALCULATION
               ================================================== */}
-
               <div className="mt-6 rounded-2xl border border-border/70 bg-secondary/30 p-5">
-
                 <h2 className="font-serif text-2xl font-semibold text-primary">
                   Price Calculation
                 </h2>
 
-                {currentRate > 0 && (
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Today&apos;s{' '}
-                    {isSilver
-                      ? 'Silver'
-                      : product.purity ||
-                        'Gold'}{' '}
-                    rate:{' '}
-
-                    <span className="font-medium text-foreground">
-                      {money(currentRate)}/gram
-                    </span>
-                  </p>
-                )}
-
-                <div className="mt-5 space-y-3 text-sm">
-
-                  <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">
-                      Net Metal Weight
-                    </span>
-
-                    <span className="font-medium">
-                      {netMetalWeight.toFixed(
-                        3
-                      )}{' '}
-                      GM
-                    </span>
-                  </div>
-
-                  <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">
-                      Applicable Metal Rate
-                    </span>
-
-                    <span className="font-medium">
-                      {money(currentRate)} /
-                      GM
-                    </span>
-                  </div>
-
-                  <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">
-                      Metal Value
-                    </span>
-
-                    <span className="font-medium">
-                      {money(metalValue)}
-                    </span>
-                  </div>
-
-                  {wastageCharges > 0 && (
-                    <div className="flex justify-between gap-4">
-                      <span className="text-muted-foreground">
-                        Wastage / VA
+                {currentRate > 0 ? (
+                  <>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Today&apos;s{' '}
+                      {isSilver
+                        ? 'Silver'
+                        : product.purity ||
+                          'Gold'}{' '}
+                      rate:{' '}
+                      <span className="font-medium text-foreground">
+                        {money(currentRate)}/gram
                       </span>
+                    </p>
 
-                      <span className="font-medium">
-                        {money(
-                          wastageCharges
-                        )}
-                      </span>
-                    </div>
-                  )}
+                    <div className="mt-5 space-y-3 text-sm">
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted-foreground">
+                          Net Metal Weight
+                        </span>
 
-                  {makingCharges > 0 && (
-                    <div className="flex justify-between gap-4">
-                      <span className="text-muted-foreground">
-                        Making Charges
-                      </span>
+                        <span className="font-medium">
+                          {netMetalWeight.toFixed(
+                            3
+                          )}{' '}
+                          GM
+                        </span>
+                      </div>
 
-                      <span className="font-medium">
-                        {money(
-                          makingCharges
-                        )}
-                      </span>
-                    </div>
-                  )}
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted-foreground">
+                          Applicable Metal Rate
+                        </span>
 
-                  {stoneCharges > 0 && (
-                    <div className="flex justify-between gap-4">
-                      <span className="text-muted-foreground">
-                        Stone Charges
-                      </span>
+                        <span className="font-medium">
+                          {money(currentRate)} /
+                          GM
+                        </span>
+                      </div>
 
-                      <span className="font-medium">
-                        {money(
-                          stoneCharges
-                        )}
-                      </span>
-                    </div>
-                  )}
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted-foreground">
+                          Metal Value
+                        </span>
 
-                  {otherCharges > 0 && (
-                    <div className="flex justify-between gap-4">
-                      <span className="text-muted-foreground">
-                        Other Charges
-                      </span>
+                        <span className="font-medium">
+                          {money(metalValue)}
+                        </span>
+                      </div>
 
-                      <span className="font-medium">
-                        {money(
-                          otherCharges
-                        )}
-                      </span>
-                    </div>
-                  )}
+                      {wastageCharges > 0 && (
+                        <div className="flex justify-between gap-4">
+                          <span className="text-muted-foreground">
+                            Wastage / VA
+                          </span>
 
-                  <div className="my-2 border-t border-border/70" />
-
-                  <div className="flex justify-between gap-4">
-                    <span className="font-medium">
-                      Subtotal
-                    </span>
-
-                    <span className="font-medium">
-                      {money(subtotal)}
-                    </span>
-                  </div>
-
-                  <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">
-                      GST ({finalGstPercent}%)
-                    </span>
-
-                    <span className="font-medium">
-                      {money(gst)}
-                    </span>
-                  </div>
-
-                  <div className="my-2 border-t border-border/70" />
-
-                  <div className="flex items-center justify-between gap-4 rounded-xl bg-primary p-4 text-primary-foreground">
-
-                    <span className="font-medium">
-                      Estimated Total
-                    </span>
-
-                    <span className="font-serif text-xl font-semibold">
-                      {money(
-                        estimatedTotal
+                          <span className="font-medium">
+                            {money(
+                              wastageCharges
+                            )}
+                          </span>
+                        </div>
                       )}
-                    </span>
 
+                      {makingCharges > 0 && (
+                        <div className="flex justify-between gap-4">
+                          <span className="text-muted-foreground">
+                            Making Charges
+                          </span>
+
+                          <span className="font-medium">
+                            {money(
+                              makingCharges
+                            )}
+                          </span>
+                        </div>
+                      )}
+
+                      {stoneCharges > 0 && (
+                        <div className="flex justify-between gap-4">
+                          <span className="text-muted-foreground">
+                            Stone Charges
+                          </span>
+
+                          <span className="font-medium">
+                            {money(
+                              stoneCharges
+                            )}
+                          </span>
+                        </div>
+                      )}
+
+                      {otherCharges > 0 && (
+                        <div className="flex justify-between gap-4">
+                          <span className="text-muted-foreground">
+                            Other Charges
+                          </span>
+
+                          <span className="font-medium">
+                            {money(
+                              otherCharges
+                            )}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="my-2 border-t border-border/70" />
+
+                      <div className="flex justify-between gap-4">
+                        <span className="font-medium">
+                          Subtotal
+                        </span>
+
+                        <span className="font-medium">
+                          {money(subtotal)}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted-foreground">
+                          GST ({finalGstPercent}%)
+                        </span>
+
+                        <span className="font-medium">
+                          {money(gst)}
+                        </span>
+                      </div>
+
+                      <div className="my-2 border-t border-border/70" />
+
+                      <div className="flex items-center justify-between gap-4 rounded-xl bg-primary p-4 text-primary-foreground">
+                        <span className="font-medium">
+                          Estimated Total
+                        </span>
+
+                        <span className="font-serif text-xl font-semibold">
+                          {money(
+                            estimatedTotal
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-5 rounded-xl border border-border/70 bg-background p-5 text-center">
+                    <p className="font-serif text-2xl font-semibold text-primary">
+                      Enquire for Price
+                    </p>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      Today&apos;s metal rate is not available.
+                      Please contact us for the current price.
+                    </p>
                   </div>
-
-                </div>
+                )}
               </div>
 
               {/* ==================================================
@@ -1153,10 +1096,10 @@ export default async function ProductDetailPage({
 
               </div>
 
-              {isOutOfStock && (
+              {!product.is_available && (
                 <p className="mt-3 text-sm text-muted-foreground">
-                  This product is currently out of stock.
-                  Please contact us for similar designs or availability.
+                  This product is currently unavailable.
+                  Please contact us for similar designs.
                 </p>
               )}
 
