@@ -326,6 +326,27 @@ export default function AdminPage() {
 
   // Filter + sort the products shown in the admin product list.
   // This is only a frontend list control; it does not change the database.
+  const dashboardStats = useMemo(() => {
+    const total = products.length
+    const available = products.filter(
+      p => p.is_available && num(p.stock_quantity) > 0,
+    ).length
+    const outOfStock = products.filter(
+      p => !p.is_available || num(p.stock_quantity) <= 0,
+    ).length
+    const featured = products.filter(p => p.is_featured).length
+    const lowStock = products
+      .filter(
+        p =>
+          p.is_available &&
+          num(p.stock_quantity) > 0 &&
+          num(p.stock_quantity) <= 2,
+      )
+      .sort((a, b) => num(a.stock_quantity) - num(b.stock_quantity))
+
+    return { total, available, outOfStock, featured, lowStock }
+  }, [products])
+
   const filteredProducts = useMemo(() => {
     const search = productSearch.trim().toLowerCase()
 
@@ -3376,6 +3397,108 @@ export default function AdminPage() {
               </div>
 
             </form>
+          </section>
+
+          {/* DASHBOARD STOCK SUMMARY */}
+
+          <section className="mb-6 rounded-2xl border border-border bg-background p-5">
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-gold">
+                Inventory Overview
+              </p>
+              <h2 className="mt-1 font-serif text-2xl font-semibold text-primary">
+                Stock Summary
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Quickly see your current product availability and low-stock items.
+              </p>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="rounded-xl border bg-secondary/30 p-4">
+                <p className="text-xs text-muted-foreground">Total Products</p>
+                <p className="mt-1 text-2xl font-bold text-primary">
+                  {dashboardStats.total}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-green-200 bg-green-50 p-4">
+                <p className="text-xs text-green-700">Available</p>
+                <p className="mt-1 text-2xl font-bold text-green-800">
+                  {dashboardStats.available}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+                <p className="text-xs text-red-700">Out of Stock</p>
+                <p className="mt-1 text-2xl font-bold text-red-800">
+                  {dashboardStats.outOfStock}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-4">
+                <p className="text-xs text-yellow-700">Featured</p>
+                <p className="mt-1 text-2xl font-bold text-yellow-800">
+                  {dashboardStats.featured}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/50 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="font-semibold text-amber-900">
+                    Low Stock Products
+                  </h3>
+                  <p className="mt-1 text-xs text-amber-800">
+                    Products with 1–2 PCS remaining.
+                  </p>
+                </div>
+                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+                  {dashboardStats.lowStock.length} item{dashboardStats.lowStock.length === 1 ? '' : 's'}
+                </span>
+              </div>
+
+              {dashboardStats.lowStock.length > 0 ? (
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {dashboardStats.lowStock.map(p => (
+                    <div
+                      key={p.id}
+                      className="flex items-center gap-3 rounded-lg border bg-background p-3"
+                    >
+                      <div className="relative size-12 shrink-0 overflow-hidden rounded-md border bg-secondary">
+                        {productThumbnails[String(p.id)] ? (
+                          <img
+                            src={productThumbnails[String(p.id)]}
+                            alt={p.name}
+                            className="h-full w-full object-contain"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-[9px] text-muted-foreground">
+                            No photo
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">
+                          {p.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {p.sku || 'No SKU'}
+                        </p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-900">
+                        {num(p.stock_quantity)} PCS
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 rounded-lg border border-dashed border-amber-200 bg-background p-4 text-center text-sm text-muted-foreground">
+                  No low-stock products right now. 👍
+                </p>
+              )}
+            </div>
           </section>
 
           {/* PRODUCTS LIST */}
