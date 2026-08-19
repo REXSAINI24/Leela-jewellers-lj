@@ -71,7 +71,6 @@ function sortImages(
  *
  * = Estimated Price
  */
-
 function calculateProductPrice(
   product: ProductWithRelations,
   rates: MetalRates,
@@ -128,7 +127,7 @@ function calculateProductPrice(
       : Math.max(grossWeight - stoneWeight, 0)
 
   if (netWeight <= 0) {
-    return product.price
+    return null
   }
 
   /*
@@ -161,11 +160,14 @@ function calculateProductPrice(
   } else if (isGold) {
     currentRate = num(rates.gold_22k)
   } else {
-    currentRate = num(product.rate)
+    currentRate = 0
   }
 
+  // Daily metal rate is required before a customer-facing price
+  // can be calculated. If today's rate is blank/zero, show Enquire
+  // for price instead of using an old/manual product rate.
   if (currentRate <= 0) {
-    return product.price
+    return null
   }
 
   /*
@@ -324,11 +326,8 @@ function calculateProductPrice(
 }
 
 /*
- * ============================================================
- * ADD ESTIMATED PRICES
- * ============================================================
+ * Adds the calculated estimated price to products.
  */
-
 async function addEstimatedPrices(
   products: ProductWithRelations[],
 ): Promise<ProductWithRelations[]> {
@@ -348,12 +347,6 @@ async function addEstimatedPrices(
     }
   })
 }
-
-/*
- * ============================================================
- * SHOP SETTINGS
- * ============================================================
- */
 
 export async function getShopSettings(): Promise<ShopSettings> {
   const supabase = await createClient()
@@ -378,12 +371,6 @@ export async function getShopSettings(): Promise<ShopSettings> {
     }
   )
 }
-
-/*
- * ============================================================
- * CATEGORIES
- * ============================================================
- */
 
 export async function getCategories(): Promise<Category[]> {
   const supabase = await createClient()
@@ -459,8 +446,6 @@ export async function getProducts(
   params: {
     category?: string
     search?: string
-    availability?: 'all' | 'available' | 'out'
-    sort?: 'newest' | 'price_low' | 'price_high'
   } = {},
 ): Promise<ProductWithRelations[]> {
   const supabase = await createClient()
@@ -471,11 +456,8 @@ export async function getProducts(
     .order('created_at', { ascending: false })
 
   /*
-   * ============================================================
    * CATEGORY FILTER
-   * ============================================================
    */
-
   if (params.category) {
     const { data: cat } = await supabase
       .from('categories')
@@ -492,85 +474,22 @@ export async function getProducts(
   }
 
   /*
-   * ============================================================
    * SEARCH
-   * ============================================================
    */
-
   if (params.search) {
     query = query.or(
       `name.ilike.%${params.search}%,description.ilike.%${params.search}%,sku.ilike.%${params.search}%`,
     )
   }
 
-  /*
-   * ============================================================
-   * AVAILABILITY FILTER
-   * ============================================================
-   *
-   * stock_quantity:
-   * 0  = Out of Stock
-   * >0 = Available
-   */
-
-  if (params.availability === 'available') {
-    query = query.gt(
-      'stock_quantity',
-      0,
-    )
-  }
-
-  if (params.availability === 'out') {
-    query = query.eq(
-      'stock_quantity',
-      0,
-    )
-  }
-
-  /*
-   * ============================================================
-   * GET PRODUCTS
-   * ============================================================
-   */
-
   const { data } = await query
 
-  let products = sortImages(
-    (data as ProductWithRelations[]) ?? [],
-  )
-
-  /*
-   * ============================================================
-   * CALCULATE ESTIMATED PRICES
-   * ============================================================
-   */
-
-  products =
-    await addEstimatedPrices(products)
-
-  /*
-   * ============================================================
-   * PRICE SORT
-   * ============================================================
-   */
-
-  if (params.sort === 'price_low') {
-    products.sort(
-      (a, b) =>
-        num(a.price) -
-        num(b.price),
+  const products =
+    sortImages(
+      (data as ProductWithRelations[]) ?? [],
     )
-  }
 
-  if (params.sort === 'price_high') {
-    products.sort(
-      (a, b) =>
-        num(b.price) -
-        num(a.price),
-    )
-  }
-
-  return products
+  return addEstimatedPrices(products)
 }
 
 /*
