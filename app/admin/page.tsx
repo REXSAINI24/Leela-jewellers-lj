@@ -65,6 +65,7 @@ const emptyProduct = {
   price: '',
   purity: '',
   description: '',
+  stock_quantity: '1',
   is_available: true,
   is_featured: false,
 }
@@ -1018,8 +1019,17 @@ export default function AdminPage() {
         description:
           product.description.trim() || null,
 
+        stock_quantity:
+          Math.max(
+            0,
+            Math.floor(
+              num(product.stock_quantity)
+            )
+          ),
+
         is_available:
-          product.is_available,
+          product.is_available &&
+          num(product.stock_quantity) > 0,
 
         is_featured:
           product.is_featured,
@@ -1338,8 +1348,33 @@ export default function AdminPage() {
       description:
         p.description ?? '',
 
+      stock_quantity:
+        String(
+          Math.max(
+            0,
+            Math.floor(
+              num(
+                (
+                  p as Product & {
+                    stock_quantity?: number | null
+                  }
+                ).stock_quantity ??
+                (p.is_available ? 1 : 0)
+              )
+            )
+          )
+        ),
+
       is_available:
-        p.is_available,
+        Boolean(p.is_available) &&
+        num(
+          (
+            p as Product & {
+              stock_quantity?: number | null
+            }
+          ).stock_quantity ??
+          (p.is_available ? 1 : 0)
+        ) > 0,
 
       is_featured:
         p.is_featured,
@@ -1404,26 +1439,62 @@ export default function AdminPage() {
   }
 
   async function markProductSold(id: string) {
-    if (!confirm('Mark this product as sold?')) {
-      return
-    }
-
     setBusy(true)
 
     try {
-      const { error } = await supabase
+      const { data: current, error: readError } = await supabase
+        .from('products')
+        .select('name, stock_quantity, is_available')
+        .eq('id', id)
+        .single()
+
+      if (readError || !current) {
+        showPopup(
+          'error',
+          'Could Not Update Stock',
+          errorText(readError, 'The product could not be found.')
+        )
+        return
+      }
+
+      const currentQuantity = Math.max(
+        0,
+        Math.floor(
+          num(current.stock_quantity ?? (current.is_available ? 1 : 0))
+        )
+      )
+
+      if (currentQuantity <= 0) {
+        showPopup(
+          'warning',
+          'Stock Already Empty',
+          `${current.name} has 0 PCS remaining.`
+        )
+        return
+      }
+
+      if (!confirm(
+        `Mark 1 PCS of "${current.name}" as sold?\n\nStock will change from ${currentQuantity} PCS to ${currentQuantity - 1} PCS.`
+      )) {
+        return
+      }
+
+      const nextQuantity = currentQuantity - 1
+
+      const { error: updateError } = await supabase
         .from('products')
         .update({
-          is_available: false,
+          stock_quantity: nextQuantity,
+          is_available: nextQuantity > 0,
           updated_at: new Date().toISOString(),
         })
         .eq('id', id)
 
-      if (error) {
+      if (updateError) {
         showPopup(
           'error',
-          'Could Not Mark Product Sold',
-          errorText(error)
+          'Stock Update Failed',
+          errorText(updateError)
         )
         return
       }
@@ -1432,13 +1503,15 @@ export default function AdminPage() {
 
       showPopup(
         'success',
-        'Product Marked Sold',
-        'The product has been marked as sold and is now unavailable.'
+        nextQuantity > 0 ? 'Stock Updated' : 'Product Sold Out',
+        nextQuantity > 0
+          ? `${current.name}: ${nextQuantity} PCS remaining.`
+          : `${current.name} is now Out of Stock.`
       )
     } catch (error) {
       showPopup(
         'error',
-        'Mark Sold Error',
+        'Stock Update Error',
         errorText(error)
       )
     } finally {
@@ -3437,6 +3510,51 @@ export default function AdminPage() {
 
               </div>
 
+              {/* STOCK / AVAILABLE / FEATURED */}
+
+              <section className="rounded-xl border p-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="text-sm font-medium">
+                    Available Pieces (PCS)
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      className="mt-1 w-full rounded-md border px-3 py-2"
+                      value={product.stock_quantity}
+                      onChange={e => {
+                        const value = Math.max(
+                          0,
+                          Math.floor(num(e.target.value))
+                        )
+
+                        setProduct(prev => ({
+                          ...prev,
+                          stock_quantity: String(value),
+                          is_available:
+                            value > 0 ? prev.is_available : false,
+                        }))
+                      }}
+                    />
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      You can increase or decrease the available PCS while editing.
+                      0 PCS automatically saves the product as Out of Stock.
+                    </span>
+                  </label>
+
+                  <div className="rounded-md border bg-secondary/30 px-3 py-2">
+                    <p className="text-xs text-muted-foreground">
+                      Current Stock Status
+                    </p>
+                    <p className="mt-1 font-semibold">
+                      {num(product.stock_quantity) > 0 && product.is_available
+                        ? `Available · ${num(product.stock_quantity)} PCS`
+                        : 'Out of Stock'}
+                    </p>
+                  </div>
+                </div>
+              </section>
+
               {/* AVAILABLE / FEATURED */}
 
               <div className="flex flex-wrap gap-6">
@@ -3665,16 +3783,55 @@ export default function AdminPage() {
                         )}
                         <span className={cn(
                           'rounded-full px-2 py-0.5 text-[11px] font-medium',
-                          p.is_available
+                          p.is_available &&
+                          num(
+                            (
+                              p as Product & {
+                                stock_quantity?: number | null
+                              }
+                            ).stock_quantity ??
+                            (p.is_available ? 1 : 0)
+                          ) > 0
                             ? 'bg-green-100 text-green-800'
                             : 'bg-red-100 text-red-800'
                         )}>
-                          {p.is_available ? 'Available' : 'Unavailable'}
+                          {p.is_available &&
+                          num(
+                            (
+                              p as Product & {
+                                stock_quantity?: number | null
+                              }
+                            ).stock_quantity ??
+                            (p.is_available ? 1 : 0)
+                          ) > 0
+                            ? `Available · ${num(
+                                (
+                                  p as Product & {
+                                    stock_quantity?: number | null
+                                  }
+                                ).stock_quantity ??
+                                (p.is_available ? 1 : 0)
+                              )} PCS`
+                            : 'Out of Stock'}
                         </span>
                       </div>
 
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {p.sku || 'No SKU'} · {p.purity || 'Purity not set'} · {p.weight ? `${p.weight} GM` : 'Weight not set'}
+                        {p.sku || 'No SKU'} · {p.purity || 'Purity not set'} · {p.weight ? `${p.weight} GM` : 'Weight not set'} · {
+                          Math.max(
+                            0,
+                            Math.floor(
+                              num(
+                                (
+                                  p as Product & {
+                                    stock_quantity?: number | null
+                                  }
+                                ).stock_quantity ??
+                                (p.is_available ? 1 : 0)
+                              )
+                            )
+                          )
+                        } PCS
                       </p>
 
                       <p className="mt-1 text-sm font-medium">
@@ -3684,7 +3841,26 @@ export default function AdminPage() {
                       </p>
                     </div>
 
-                    <div className="flex shrink-0 gap-2">
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={
+                          busy ||
+                          num(
+                            (
+                              p as Product & {
+                                stock_quantity?: number | null
+                              }
+                            ).stock_quantity ??
+                            (p.is_available ? 1 : 0)
+                          ) <= 0
+                        }
+                        onClick={() => markProductSold(String(p.id))}
+                        className="rounded-md border border-amber-200 px-3 py-1.5 text-sm text-amber-800 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Mark 1 Sold
+                      </button>
+
                       <button
                         type="button"
                         onClick={() => editProduct(p)}
