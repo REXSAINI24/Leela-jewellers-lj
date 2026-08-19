@@ -1351,6 +1351,68 @@ export default function AdminPage() {
     })
   }
 
+  async function markOneSold(p: Product) {
+    const currentStock = Math.max(
+      0,
+      Math.floor(num(p.stock_quantity))
+    )
+
+    if (currentStock <= 0) {
+      showPopup(
+        'warning',
+        'Already Out of Stock',
+        'This product already has 0 PCS available.'
+      )
+      return
+    }
+
+    if (!confirm(`Mark 1 PCS of "${p.name}" as sold?\n\nStock will change from ${currentStock} PCS to ${currentStock - 1} PCS.`)) {
+      return
+    }
+
+    setBusy(true)
+
+    try {
+      const nextStock = currentStock - 1
+
+      const { error } = await supabase
+        .from('products')
+        .update({
+          stock_quantity: nextStock,
+          is_available: nextStock > 0,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', p.id)
+
+      if (error) {
+        showPopup(
+          'error',
+          'Stock Update Failed',
+          errorText(error)
+        )
+        return
+      }
+
+      await load()
+
+      showPopup(
+        'success',
+        nextStock > 0 ? 'Stock Updated' : 'Product Sold Out',
+        nextStock > 0
+          ? `"${p.name}" now has ${nextStock} PCS available.`
+          : `"${p.name}" is now Out of Stock.`
+      )
+    } catch (error) {
+      showPopup(
+        'error',
+        'Stock Update Failed',
+        errorText(error)
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function removeProduct(
     id: string
   ) {
@@ -3490,7 +3552,19 @@ export default function AdminPage() {
                       </div>
                     </div>
 
-                    <div className="flex shrink-0 gap-2">
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={
+                          busy ||
+                          num(p.stock_quantity) <= 0
+                        }
+                        onClick={() => markOneSold(p)}
+                        className="rounded-md border border-amber-200 px-3 py-1.5 text-sm text-amber-800 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Mark 1 Sold
+                      </button>
+
                       <button
                         type="button"
                         onClick={() => editProduct(p)}
