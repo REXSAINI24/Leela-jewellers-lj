@@ -152,11 +152,36 @@ export async function generateMetadata({
     return { title: 'Product Not Found' }
   }
 
+  const productImage = product.product_images?.[0]?.public_url || undefined
+
   return {
     title: product.name,
     description:
       product.description ||
       `${product.name} at LEELA JEWELLERS, Jodhpur. Enquire on WhatsApp for today's price and availability.`,
+    openGraph: {
+      title: `${product.name} | LEELA JEWELLERS`,
+      description:
+        product.description ||
+        `${product.name} at LEELA JEWELLERS. Enquire on WhatsApp for today's price and availability.`,
+      type: 'website',
+      images: productImage
+        ? [
+            {
+              url: productImage,
+              alt: product.name,
+            },
+          ]
+        : [],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: `${product.name} | LEELA JEWELLERS`,
+      description:
+        product.description ||
+        `${product.name} at LEELA JEWELLERS.`,
+      images: productImage ? [productImage] : [],
+    },
   }
 }
 
@@ -195,14 +220,45 @@ export default async function ProductDetailPage({
 
     gst_percent?: number | string | null
 
-    pricing_details?: PricingDetails | null
+    // Optional inventory field. If your products table has this column,
+    // it will control the stock badge automatically. If not, the page
+    // safely falls back to the existing is_available flag.
     stock_quantity?: number | string | null
+
+    pricing_details?: PricingDetails | null
   }
 
   const savedPricing = productData.pricing_details
 
-  const stockQuantity = num(productData.stock_quantity)
-  const isInStock = product.is_available && stockQuantity > 0
+  /*
+   * ============================================================
+   * INVENTORY / AVAILABILITY
+   *
+   * If stock_quantity exists in the products table, it becomes the
+   * source of truth for stock status. Otherwise we keep backward
+   * compatibility with the existing is_available flag.
+   * ============================================================
+   */
+
+  const rawStockQuantity = productData.stock_quantity
+
+  const hasStockTracking =
+    rawStockQuantity !== null &&
+    rawStockQuantity !== undefined &&
+    String(rawStockQuantity).trim() !== ''
+
+  const stockQuantity = hasStockTracking
+    ? Math.max(0, Math.floor(num(rawStockQuantity)))
+    : null
+
+  const isOutOfStock = hasStockTracking
+    ? stockQuantity === 0
+    : !product.is_available
+
+  const isLowStock =
+    stockQuantity !== null &&
+    stockQuantity > 0 &&
+    stockQuantity <= 3
 
   /*
    * ============================================================
@@ -516,7 +572,7 @@ export default async function ProductDetailPage({
 
             <div>
 
-              <div className="relative aspect-square overflow-hidden rounded-2xl border border-border/70 bg-secondary">
+              <div className="relative aspect-[3/4] overflow-hidden rounded-2xl border border-border/70 bg-secondary">
 
                 {productImages.length > 0 ? (
 
@@ -562,7 +618,7 @@ export default async function ProductDetailPage({
                                   index === 0
                                 }
                                 sizes="(max-width: 768px) 100vw, 50vw"
-                                className="object-cover"
+                                className="object-contain"
                               />
                             </div>
 
@@ -618,7 +674,7 @@ export default async function ProductDetailPage({
                               }`}
                               fill
                               sizes="96px"
-                              className="object-cover"
+                              className="object-contain p-1"
                             />
 
                           </label>
@@ -654,6 +710,33 @@ export default async function ProductDetailPage({
               <h1 className="mt-3 font-serif text-4xl font-semibold text-primary md:text-5xl">
                 {product.name}
               </h1>
+
+              {/* ==================================================
+                  AVAILABILITY / STOCK STATUS
+              ================================================== */}
+              <div className="mt-4">
+                {isOutOfStock ? (
+                  <div className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700">
+                    <span className="size-2 rounded-full bg-red-500" />
+                    Out of Stock
+                  </div>
+                ) : isLowStock ? (
+                  <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-700">
+                    <span className="size-2 rounded-full bg-amber-500" />
+                    Only {stockQuantity} {stockQuantity === 1 ? 'piece' : 'pieces'} left
+                  </div>
+                ) : stockQuantity !== null ? (
+                  <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700">
+                    <span className="size-2 rounded-full bg-emerald-500" />
+                    In Stock · {stockQuantity} pieces available
+                  </div>
+                ) : product.is_available ? (
+                  <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700">
+                    <span className="size-2 rounded-full bg-emerald-500" />
+                    Available
+                  </div>
+                ) : null}
+              </div>
 
               {/* ==================================================
                   WEIGHT DETAILS
@@ -1070,9 +1153,10 @@ export default async function ProductDetailPage({
 
               </div>
 
-              {!isInStock && (
-                <p className="mt-3 text-sm text-red-600">
-                  This product is currently out of stock. Please contact us for similar designs or availability.
+              {isOutOfStock && (
+                <p className="mt-3 text-sm text-muted-foreground">
+                  This product is currently out of stock.
+                  Please contact us for similar designs or availability.
                 </p>
               )}
 
