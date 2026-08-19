@@ -5,10 +5,37 @@ import { Button } from '@/components/ui/button'
 import type { Product } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
+type PricingDetails = {
+  gross_weight?: string | number
+  stone_weight?: string | number
+  net_weight?: string | number
+  calculated?: {
+    estimated_total?: number
+    applicable_rate?: number
+    metal_value?: number
+    wastage?: number
+    making?: number
+    stone_total?: number
+    other_total?: number
+    subtotal?: number
+    gst?: number
+  }
+}
+
+type WhatsAppProduct = Pick<
+  Product,
+  'name' | 'sku' | 'price' | 'weight' | 'purity'
+> & {
+  pricing_details?: PricingDetails
+  gross_weight?: string | number
+  stone_weight?: string | number
+  net_weight?: string | number
+}
+
 type Props = {
   whatsappNumber: string
   shopName?: string
-  product?: Pick<Product, 'name' | 'sku' | 'price' | 'weight' | 'purity'>
+  product?: WhatsAppProduct
   className?: string
   size?: 'sm' | 'default' | 'lg'
   label?: string
@@ -27,6 +54,18 @@ function WhatsAppIcon({ className }: { className?: string }) {
   )
 }
 
+function num(value: string | number | null | undefined) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
+function money(value: number) {
+  return `₹${Number(value || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
+}
+
 function buildProductMessage(
   shopName?: string,
   product?: Props['product'],
@@ -39,8 +78,32 @@ function buildProductMessage(
 
   message += `Product: ${name}\n`
 
-  if (product?.weight) {
-    message += `Weight: ${product.weight} GM\n`
+  // Weight details
+  const pricing = product?.pricing_details
+
+  const grossWeight =
+    pricing?.gross_weight ??
+    product?.gross_weight ??
+    product?.weight
+
+  const stoneWeight =
+    pricing?.stone_weight ??
+    product?.stone_weight
+
+  const netWeight =
+    pricing?.net_weight ??
+    product?.net_weight
+
+  if (grossWeight !== undefined && grossWeight !== '') {
+    message += `Gross Weight: ${num(grossWeight).toFixed(3)} GM\n`
+  }
+
+  if (stoneWeight !== undefined && stoneWeight !== '') {
+    message += `Stone Weight: ${num(stoneWeight).toFixed(3)} GM\n`
+  }
+
+  if (netWeight !== undefined && netWeight !== '') {
+    message += `Net Metal Weight: ${num(netWeight).toFixed(3)} GM\n`
   }
 
   if (product?.purity) {
@@ -51,11 +114,22 @@ function buildProductMessage(
     message += `SKU: ${product.sku}\n`
   }
 
+  // Estimated price
+  const estimatedTotal =
+    pricing?.calculated?.estimated_total ??
+    (product?.price != null
+      ? num(product.price)
+      : 0)
+
+  if (estimatedTotal > 0) {
+    message += `Estimated Price: ${money(estimatedTotal)}\n`
+  }
+
   if (productUrl) {
     message += `\nProduct Link:\n${productUrl}\n`
   }
 
-  message += `\nPlease provide more details.`
+  message += `\nPlease provide more details about this product.`
 
   return message
 }
