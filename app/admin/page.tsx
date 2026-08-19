@@ -25,10 +25,6 @@ type OtherRow = {
   price_per_unit: string
 }
 
-type AdminProduct = Product & {
-  stock_quantity?: number | null
-}
-
 type PricingDetails = {
   gross_weight: string
   stone_weight: string
@@ -42,6 +38,14 @@ type PricingDetails = {
   gst_percent: string
   stones: StoneRow[]
   other_charges: OtherRow[]
+}
+
+type ProductImage = {
+  id: string
+  product_id: string
+  storage_path: string
+  public_url: string
+  sort_order: number
 }
 
 type Popup = {
@@ -61,7 +65,6 @@ const emptyProduct = {
   price: '',
   purity: '',
   description: '',
-  stock_quantity: '1',
   is_available: true,
   is_featured: false,
 }
@@ -107,7 +110,7 @@ export default function AdminPage() {
   const [authorized, setAuthorized] = useState(false)
   const [settings, setSettings] = useState<ShopSettings | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
-  const [products, setProducts] = useState<AdminProduct[]>([])
+  const [products, setProducts] = useState<Product[]>([])
   const [product, setProduct] = useState<typeof emptyProduct>(emptyProduct)
   const [pricing, setPricing] = useState<PricingDetails>(emptyPricing)
   const [chargeTypes, setChargeTypes] = useState<string[]>([])
@@ -123,6 +126,8 @@ export default function AdminPage() {
   // MULTIPLE IMAGE SYSTEM
   const [imageFiles, setImageFiles] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
+  const [productImages, setProductImages] = useState<ProductImage[]>([])
+  const [existingProductImages, setExistingProductImages] = useState<ProductImage[]>([])
 
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
@@ -191,7 +196,7 @@ export default function AdminPage() {
         return
       }
 
-      const [s, c, p, r, ct] = await Promise.all([
+      const [s, c, p, pi, r, ct] = await Promise.all([
         supabase
           .from('shop_settings')
           .select('*')
@@ -207,6 +212,11 @@ export default function AdminPage() {
           .from('products')
           .select('*')
           .order('created_at', { ascending: false }),
+
+        supabase
+          .from('product_images')
+          .select('*')
+          .order('sort_order', { ascending: true }),
 
         supabase
           .from('metal_rates')
@@ -241,6 +251,13 @@ export default function AdminPage() {
           errorText(p.error)
         )
 
+      if (pi.error)
+        showPopup(
+          'error',
+          'Product Images Load Failed',
+          errorText(pi.error)
+        )
+
       if (r.error)
         showPopup(
           'error',
@@ -257,7 +274,8 @@ export default function AdminPage() {
 
       setSettings(s.data as ShopSettings | null)
       setCategories((c.data as Category[]) ?? [])
-      setProducts((p.data as AdminProduct[]) ?? [])
+      setProducts((p.data as Product[]) ?? [])
+      setProductImages((pi.data as ProductImage[]) ?? [])
 
       if (r.data) {
         setRates({
@@ -304,27 +322,6 @@ export default function AdminPage() {
     [product.name]
   )
 
-  const getStockQuantity = (p: AdminProduct) =>
-    Math.max(0, Math.floor(num(p.stock_quantity ?? 1)))
-
-  const availableProductCount = products.filter(
-    p => getStockQuantity(p) > 0
-  ).length
-
-  const outOfStockProductCount = products.filter(
-    p => getStockQuantity(p) <= 0
-  ).length
-
-  const lowStockProducts = products.filter(p => {
-    const qty = getStockQuantity(p)
-    return qty > 0 && qty <= 2
-  })
-
-  const totalStockPieces = products.reduce(
-    (sum, p) => sum + getStockQuantity(p),
-    0
-  )
-
   // Filter + sort the products shown in the admin product list.
   // This is only a frontend list control; it does not change the database.
   const filteredProducts = useMemo(() => {
@@ -342,13 +339,10 @@ export default function AdminPage() {
         !productCategoryFilter ||
         p.category_id === productCategoryFilter
 
-      const stockQuantity = getStockQuantity(p)
-
       const matchesStatus =
         productStatusFilter === 'all' ||
-        (productStatusFilter === 'available' && stockQuantity > 0) ||
-        (productStatusFilter === 'unavailable' && stockQuantity <= 0) ||
-        (productStatusFilter === 'low_stock' && stockQuantity > 0 && stockQuantity <= 2) ||
+        (productStatusFilter === 'available' && p.is_available) ||
+        (productStatusFilter === 'unavailable' && !p.is_available) ||
         (productStatusFilter === 'featured' && p.is_featured)
 
       return matchesSearch && matchesCategory && matchesStatus
@@ -623,6 +617,7 @@ export default function AdminPage() {
     )
 
     setImagePreviews([])
+    setExistingProductImages([])
   }
 
   function updatePricing<K extends keyof PricingDetails>(
@@ -960,7 +955,7 @@ export default function AdminPage() {
     setBusy(true)
 
     try {
-      const payload: any = {
+      const payload = {
         name: product.name.trim(),
 
         slug: (
@@ -988,16 +983,8 @@ export default function AdminPage() {
         description:
           product.description.trim() || null,
 
-        stock_quantity:
-          Math.max(
-            0,
-            Math.floor(
-              num(product.stock_quantity)
-            )
-          ),
-
         is_available:
-          num(product.stock_quantity) > 0,
+          product.is_available,
 
         is_featured:
           product.is_featured,
@@ -1256,6 +1243,12 @@ export default function AdminPage() {
     setImageFiles([])
     setImagePreviews([])
 
+    setExistingProductImages(
+      productImages
+        .filter(image => String(image.product_id) === String(p.id))
+        .sort((a, b) => Number(a.sort_order) - Number(b.sort_order))
+    )
+
     setProduct({
       ...emptyProduct,
 
@@ -1290,21 +1283,8 @@ export default function AdminPage() {
       description:
         p.description ?? '',
 
-      stock_quantity:
-        String(
-          Math.max(
-            0,
-            Math.floor(
-              num(
-                p.stock_quantity ??
-                (p.is_available ? 1 : 0)
-              )
-            )
-          )
-        ),
-
       is_available:
-        getStockQuantity(p) > 0,
+        p.is_available,
 
       is_featured:
         p.is_featured,
@@ -1366,61 +1346,6 @@ export default function AdminPage() {
 
       behavior: 'smooth',
     })
-  }
-
-  async function markOneSold(p: AdminProduct) {
-    const current = getStockQuantity(p)
-
-    if (current <= 0) {
-      showPopup(
-        'warning',
-        'Already Out of Stock',
-        `${p.name} already has 0 pieces in stock.`
-      )
-      return
-    }
-
-    const nextQuantity = Math.max(0, current - 1)
-
-    setBusy(true)
-
-    try {
-      const { error } = await supabase
-        .from('products')
-        .update({
-          stock_quantity: nextQuantity,
-          is_available: nextQuantity > 0,
-          updated_at: new Date().toISOString(),
-        } as any)
-        .eq('id', p.id)
-
-      if (error) {
-        showPopup(
-          'error',
-          'Stock Update Failed',
-          errorText(error)
-        )
-        return
-      }
-
-      await load()
-
-      showPopup(
-        'success',
-        'Stock Updated',
-        nextQuantity > 0
-          ? `${p.name}: 1 piece marked as sold. ${nextQuantity} PCS remaining.`
-          : `${p.name}: 1 piece marked as sold. The product is now Out of Stock.`
-      )
-    } catch (error) {
-      showPopup(
-        'error',
-        'Stock Update Error',
-        errorText(error)
-      )
-    } finally {
-      setBusy(false)
-    }
   }
 
   async function removeProduct(
@@ -2274,88 +2199,6 @@ export default function AdminPage() {
                   </div>
                 </label>
               </div>
-
-              {/* STOCK / INVENTORY */}
-
-              <section className="rounded-xl border border-gold/30 bg-secondary/20 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.2em] text-gold">
-                      Inventory
-                    </p>
-                    <h3 className="font-serif text-xl font-semibold text-primary">
-                      Stock Quantity
-                    </h3>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Enter how many pieces you currently have. 0 automatically means Out of Stock.
-                    </p>
-                  </div>
-
-                  <div className={cn(
-                    'rounded-full px-3 py-1.5 text-xs font-semibold',
-                    num(product.stock_quantity) <= 0
-                      ? 'bg-red-100 text-red-800'
-                      : num(product.stock_quantity) <= 2
-                        ? 'bg-amber-100 text-amber-800'
-                        : 'bg-green-100 text-green-800'
-                  )}>
-                    {num(product.stock_quantity) <= 0
-                      ? 'Out of Stock'
-                      : num(product.stock_quantity) <= 2
-                        ? `Low Stock · ${Math.floor(num(product.stock_quantity))} PCS`
-                        : `Available · ${Math.floor(num(product.stock_quantity))} PCS`}
-                  </div>
-                </div>
-
-                <div className="mt-4 grid gap-4 md:grid-cols-2">
-                  <label className="text-sm font-medium">
-                    Available Pieces (PCS)
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      inputMode="numeric"
-                      className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-lg font-semibold"
-                      value={product.stock_quantity}
-                      onChange={e => {
-                        const value = e.target.value
-                        const quantity =
-                          value === ''
-                            ? ''
-                            : String(
-                                Math.max(
-                                  0,
-                                  Math.floor(
-                                    Number(value) || 0
-                                  )
-                                )
-                              )
-
-                        setProduct(prev => ({
-                          ...prev,
-                          stock_quantity: quantity,
-                          is_available:
-                            quantity !== '' &&
-                            num(quantity) > 0,
-                        }))
-                      }}
-                    />
-                  </label>
-
-                  <div className="rounded-md border bg-background px-4 py-3">
-                    <p className="text-xs text-muted-foreground">
-                      Customer Website Status
-                    </p>
-                    <p className="mt-1 text-lg font-semibold">
-                      {num(product.stock_quantity) <= 0
-                        ? '🔴 Out of Stock'
-                        : num(product.stock_quantity) <= 2
-                          ? `🟠 Low Stock · ${Math.floor(num(product.stock_quantity))} PCS`
-                          : `🟢 Available · ${Math.floor(num(product.stock_quantity))} PCS`}
-                    </p>
-                  </div>
-                </div>
-              </section>
 
               {/* WEIGHT DETAILS */}
 
@@ -3309,7 +3152,36 @@ export default function AdminPage() {
                   Select multiple JPG, PNG, WebP or AVIF images. Maximum 8 MB per image.
                 </p>
 
-                {/* IMAGE PREVIEWS */}
+                {/* EXISTING SAVED PHOTOS */}
+
+                {existingProductImages.length > 0 && (
+                  <div className="mt-4">
+                    <p className="mb-2 text-xs font-medium text-muted-foreground">
+                      Existing Photos
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                      {existingProductImages.map((image, index) => (
+                        <div
+                          key={image.id}
+                          className="relative overflow-hidden rounded-xl border bg-secondary"
+                        >
+                          <img
+                            src={image.public_url}
+                            alt={`${product.name || 'Product'} photo ${index + 1}`}
+                            className="aspect-square w-full object-cover"
+                          />
+
+                          <div className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-1 text-xs text-white">
+                            Saved {index + 1}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* NEW IMAGE PREVIEWS */}
 
                 {imagePreviews.length >
                   0 && (
@@ -3358,25 +3230,27 @@ export default function AdminPage() {
 
               </div>
 
-              {/* STOCK STATUS / FEATURED */}
+              {/* AVAILABLE / FEATURED */}
 
-              <div className="flex flex-wrap items-center gap-6">
-                <div className="text-sm">
-                  <span className="font-medium">Availability:</span>{' '}
-                  <span className={cn(
-                    'font-semibold',
-                    num(product.stock_quantity) > 0
-                      ? 'text-green-700'
-                      : 'text-red-700'
-                  )}>
-                    {num(product.stock_quantity) > 0
-                      ? `Available · ${Math.floor(num(product.stock_quantity))} PCS`
-                      : 'Out of Stock'}
-                  </span>
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    (automatically controlled by stock quantity)
-                  </span>
-                </div>
+              <div className="flex flex-wrap gap-6">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={
+                      product.is_available
+                    }
+                    onChange={e =>
+                      setProduct({
+                        ...product,
+                        is_available:
+                          e.target
+                            .checked,
+                      })
+                    }
+                  />
+
+                  Available
+                </label>
 
                 <label className="flex items-center gap-2 text-sm">
                   <input
@@ -3429,92 +3303,6 @@ export default function AdminPage() {
               </div>
 
             </form>
-          </section>
-
-          {/* INVENTORY OVERVIEW */}
-
-          <section className="mb-6 rounded-2xl border border-border bg-background p-5">
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-gold">
-                  Inventory Overview
-                </p>
-                <h2 className="font-serif text-2xl font-semibold text-primary">
-                  Stock Summary
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Quickly see your current product availability and low-stock items.
-                </p>
-              </div>
-
-              <p className="text-sm font-medium text-muted-foreground">
-                Total pieces in stock: <span className="text-foreground">{totalStockPieces}</span>
-              </p>
-            </div>
-
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-xl border p-4">
-                <p className="text-xs text-muted-foreground">Total Products</p>
-                <p className="mt-1 text-2xl font-bold">{products.length}</p>
-              </div>
-
-              <div className="rounded-xl border border-green-200 bg-green-50 p-4">
-                <p className="text-xs text-green-700">Available</p>
-                <p className="mt-1 text-2xl font-bold text-green-800">{availableProductCount}</p>
-              </div>
-
-              <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-                <p className="text-xs text-red-700">Out of Stock</p>
-                <p className="mt-1 text-2xl font-bold text-red-800">{outOfStockProductCount}</p>
-              </div>
-
-              <div className="rounded-xl border p-4">
-                <p className="text-xs text-muted-foreground">Featured</p>
-                <p className="mt-1 text-2xl font-bold">
-                  {products.filter(p => p.is_featured).length}
-                </p>
-              </div>
-            </div>
-
-            {lowStockProducts.length > 0 && (
-              <div className="mt-5">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="font-serif text-xl font-semibold text-primary">
-                      Low Stock Products
-                    </h3>
-                    <p className="text-xs text-muted-foreground">
-                      Products with 1–2 PCS remaining.
-                    </p>
-                  </div>
-
-                  <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
-                    {lowStockProducts.length} items
-                  </span>
-                </div>
-
-                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {lowStockProducts.map(p => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => editProduct(p)}
-                      className="flex items-center justify-between rounded-xl border p-3 text-left hover:bg-secondary/40"
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-semibold">{p.name}</span>
-                        <span className="block text-xs text-muted-foreground">
-                          {p.sku || 'No SKU'}
-                        </span>
-                      </span>
-                      <span className="ml-3 shrink-0 text-sm font-bold text-amber-700">
-                        {getStockQuantity(p)} PCS
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
           </section>
 
           {/* PRODUCTS LIST */}
@@ -3575,8 +3363,7 @@ export default function AdminPage() {
                 >
                   <option value="all">All products</option>
                   <option value="available">Available</option>
-                  <option value="low_stock">Low Stock (1–2 PCS)</option>
-                  <option value="unavailable">Out of Stock</option>
+                  <option value="unavailable">Unavailable</option>
                   <option value="featured">Featured</option>
                 </select>
               </label>
@@ -3645,6 +3432,28 @@ export default function AdminPage() {
                     key={p.id}
                     className="flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
                   >
+                    {(() => {
+                      const image = productImages.find(
+                        item => String(item.product_id) === String(p.id)
+                      )
+
+                      return (
+                        <div className="size-20 shrink-0 overflow-hidden rounded-lg border bg-secondary">
+                          {image?.public_url ? (
+                            <img
+                              src={image.public_url}
+                              alt={p.name}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full items-center justify-center px-2 text-center text-xs text-muted-foreground">
+                              No Photo
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })()}
+
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="font-medium">
@@ -3657,22 +3466,16 @@ export default function AdminPage() {
                         )}
                         <span className={cn(
                           'rounded-full px-2 py-0.5 text-[11px] font-medium',
-                          getStockQuantity(p) <= 0
-                            ? 'bg-red-100 text-red-800'
-                            : getStockQuantity(p) <= 2
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-green-100 text-green-800'
+                          p.is_available
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-red-100 text-red-800'
                         )}>
-                          {getStockQuantity(p) <= 0
-                            ? 'Out of Stock'
-                            : getStockQuantity(p) <= 2
-                              ? `Low Stock · ${getStockQuantity(p)} PCS`
-                              : `Available · ${getStockQuantity(p)} PCS`}
+                          {p.is_available ? 'Available' : 'Unavailable'}
                         </span>
                       </div>
 
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {p.sku || 'No SKU'} · {p.purity || 'Purity not set'} · {p.weight ? `${p.weight} GM` : 'Weight not set'} · Stock: {getStockQuantity(p)} PCS
+                        {p.sku || 'No SKU'} · {p.purity || 'Purity not set'} · {p.weight ? `${p.weight} GM` : 'Weight not set'}
                       </p>
 
                       <p className="mt-1 text-sm font-medium">
@@ -3682,16 +3485,7 @@ export default function AdminPage() {
                       </p>
                     </div>
 
-                    <div className="flex shrink-0 flex-wrap justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => markOneSold(p)}
-                        disabled={busy || getStockQuantity(p) <= 0}
-                        className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Mark 1 Sold
-                      </button>
-
+                    <div className="flex shrink-0 gap-2">
                       <button
                         type="button"
                         onClick={() => editProduct(p)}
