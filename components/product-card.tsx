@@ -11,7 +11,34 @@ export function ProductCard({
   product: ProductWithRelations
 }) {
   const image = product.product_images[0]
-  const price = formatPrice(product.price)
+
+  /*
+   * ============================================================
+   * PIECE / DIRECT PRICE
+   * ============================================================
+   *
+   * Piece products do not depend on today's metal rate.
+   *
+   * If product.price exists, use it.
+   * Otherwise, if the product has no weight and has a rate,
+   * treat product.rate as its direct piece price.
+   */
+
+  const productWeight = Number(product.weight ?? 0)
+
+  const directPieceRate =
+    productWeight <= 0 &&
+    product.rate &&
+    Number(product.rate) > 0
+      ? Number(product.rate)
+      : null
+
+  const finalPrice =
+    directPieceRate !== null
+      ? directPieceRate
+      : product.price
+
+  const price = formatPrice(finalPrice)
 
   const weight = product.weight
     ? `${product.weight} GM`
@@ -19,25 +46,40 @@ export function ProductCard({
 
   const purity = product.purity || null
 
-  const rate = product.rate
-    ? formatPrice(product.rate)
-    : null
+  /*
+   * RATE DISPLAY
+   *
+   * For piece products, rate is already their direct price,
+   * so we don't show "Rate/GM".
+   */
+  const rate =
+    productWeight > 0 && product.rate
+      ? formatPrice(product.rate)
+      : null
 
-  const stockQuantity = Number(product.stock_quantity ?? 0)
+  const stockQuantity =
+    Number(product.stock_quantity ?? 0)
 
   const isInStock =
-    product.is_available && stockQuantity > 0
+    product.is_available &&
+    stockQuantity > 0
 
   return (
     <Link
       href={`/products/${product.slug}`}
       className="group flex flex-col overflow-hidden rounded-xl border border-border/70 bg-card transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
     >
-      {/* PRODUCT IMAGE */}
+      {/* ======================================================
+          PRODUCT IMAGE
+      ====================================================== */}
+
       <div className="relative aspect-square overflow-hidden bg-secondary">
         {image ? (
           <Image
-            src={image.public_url || '/placeholder.svg'}
+            src={
+              image.public_url ||
+              '/placeholder.svg'
+            }
             alt={product.name}
             fill
             sizes="(max-width: 768px) 50vw, 25vw"
@@ -50,6 +92,7 @@ export function ProductCard({
         )}
 
         {/* STOCK STATUS */}
+
         {!isInStock && (
           <Badge
             variant="secondary"
@@ -60,10 +103,14 @@ export function ProductCard({
         )}
       </div>
 
-      {/* PRODUCT INFO */}
+      {/* ======================================================
+          PRODUCT INFO
+      ====================================================== */}
+
       <div className="flex flex-1 flex-col p-3">
 
         {/* CATEGORY */}
+
         {product.categories && (
           <span className="text-[10px] uppercase tracking-[0.18em] text-gold">
             {product.categories.name}
@@ -71,13 +118,16 @@ export function ProductCard({
         )}
 
         {/* NAME */}
+
         <h3 className="mt-1 line-clamp-2 font-serif text-base font-medium leading-snug text-foreground">
           {product.name}
         </h3>
 
         {/* WEIGHT + PURITY */}
+
         {(weight || purity) && (
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+
             {purity && (
               <span className="rounded-md bg-secondary px-2 py-1">
                 {purity}
@@ -89,10 +139,12 @@ export function ProductCard({
                 {weight}
               </span>
             )}
+
           </div>
         )}
 
-        {/* RATE */}
+        {/* METAL RATE */}
+
         {rate && (
           <div className="mt-3 text-[11px] text-muted-foreground">
             Rate:{' '}
@@ -103,6 +155,7 @@ export function ProductCard({
         )}
 
         {/* STOCK QUANTITY */}
+
         <div className="mt-2">
           {isInStock ? (
             <span className="text-[11px] font-medium text-green-600">
@@ -115,17 +168,24 @@ export function ProductCard({
           )}
         </div>
 
-        {/* PRICE */}
+        {/* ==================================================
+            PRICE
+        ================================================== */}
+
         <div className="mt-auto pt-3">
           {price ? (
             <div>
+
               <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Estimated Price
+                {directPieceRate !== null
+                  ? 'Price / Piece'
+                  : 'Estimated Price'}
               </p>
 
               <span className="text-base font-semibold text-primary">
                 {price}
               </span>
+
             </div>
           ) : (
             <span className="text-sm font-medium text-muted-foreground">
