@@ -300,6 +300,21 @@ export default async function ProductDetailPage({
 
   /*
    * ============================================================
+   * DIRECT / PIECE PRICE
+   * ============================================================
+   *
+   * Piece-based products can have their own fixed price.
+   * Their price must NOT depend on today's metal rate.
+   *
+   * We identify them by having no metal weight and having a
+   * direct product.price saved in Supabase.
+   */
+  const directPrice = num(product.price)
+  const isPiecePriceProduct =
+    netMetalWeight <= 0 && directPrice > 0
+
+  /*
+   * ============================================================
    * CATEGORY / PURITY / METAL RATE
    * ============================================================
    */
@@ -741,7 +756,19 @@ export default async function ProductDetailPage({
                   Price Calculation
                 </h2>
 
-                {currentRate > 0 ? (
+                {isPiecePriceProduct ? (
+                  <div className="mt-5 rounded-xl border border-border/70 bg-background p-5">
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-sm text-muted-foreground">
+                        Price / Piece
+                      </span>
+
+                      <span className="font-serif text-2xl font-semibold text-primary">
+                        {money(directPrice)}
+                      </span>
+                    </div>
+                  </div>
+                ) : currentRate > 0 ? (
                   <>
                     <p className="mt-1 text-sm text-muted-foreground">
                       Today&apos;s{' '}
@@ -895,6 +922,165 @@ export default async function ProductDetailPage({
                   </div>
                 )}
               </div>
+
+              {/* ==================================================
+                  STONE DETAILS
+              ================================================== */}
+
+              {stoneRows.length > 0 && (
+                <div className="mt-6">
+
+                  <h2 className="font-serif text-xl font-semibold text-primary">
+                    Stone Details
+                  </h2>
+
+                  <div className="mt-3 space-y-2">
+
+                    {stoneRows.map(
+                      (stone) => {
+                        const rowTotal =
+                          num(stone.pcs) *
+                          num(
+                            stone.price_per_pc
+                          )
+
+                        return (
+                          <div
+                            key={stone.id}
+                            className="rounded-xl border border-border/70 p-4"
+                          >
+
+                            <div className="flex items-start justify-between gap-4">
+
+                              <div>
+
+                                {stone.stone_name && (
+                                  <p className="font-medium">
+                                    {
+                                      stone.stone_name
+                                    }
+                                  </p>
+                                )}
+
+                                <div className="mt-1 text-xs text-muted-foreground">
+
+                                  {stone.size && (
+                                    <span>
+                                      Size:{' '}
+                                      {
+                                        stone.size
+                                      }{' '}
+                                      ·{' '}
+                                    </span>
+                                  )}
+
+                                  {stone.quality && (
+                                    <span>
+                                      Quality:{' '}
+                                      {
+                                        stone.quality
+                                      }{' '}
+                                      ·{' '}
+                                    </span>
+                                  )}
+
+                                  <span>
+                                    {num(
+                                      stone.pcs
+                                    )}{' '}
+                                    PC
+                                  </span>
+
+                                </div>
+
+                              </div>
+
+                              <p className="font-medium">
+                                {money(
+                                  rowTotal
+                                )}
+                              </p>
+
+                            </div>
+
+                          </div>
+                        )
+                      }
+                    )}
+
+                  </div>
+
+                </div>
+              )}
+
+              {/* ==================================================
+                  OTHER CHARGES
+              ================================================== */}
+
+              {otherRows.length > 0 && (
+                <div className="mt-6">
+
+                  <h2 className="font-serif text-xl font-semibold text-primary">
+                    Other Charges
+                  </h2>
+
+                  <div className="mt-3 space-y-2">
+
+                    {otherRows.map(
+                      (charge) => {
+                        const rowTotal =
+                          num(
+                            charge.quantity
+                          ) *
+                          num(
+                            charge.price_per_unit
+                          )
+
+                        return (
+                          <div
+                            key={charge.id}
+                            className="flex items-center justify-between gap-4 rounded-xl border border-border/70 p-4"
+                          >
+
+                            <div>
+
+                              <p className="font-medium">
+                                {charge.charge_type ||
+                                  'Other'}
+                              </p>
+
+                              {charge.description && (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {
+                                    charge.description
+                                  }
+                                </p>
+                              )}
+
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Qty:{' '}
+                                {num(
+                                  charge.quantity
+                                )}
+                              </p>
+
+                            </div>
+
+                            <p className="font-medium">
+                              {money(
+                                rowTotal
+                              )}
+                            </p>
+
+                          </div>
+                        )
+                      }
+                    )}
+
+                  </div>
+
+                </div>
+              )}
 
               {/* ==================================================
                   DESCRIPTION
