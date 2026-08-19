@@ -40,14 +40,6 @@ type PricingDetails = {
   other_charges: OtherRow[]
 }
 
-type ProductImage = {
-  id: string
-  product_id: string
-  storage_path: string
-  public_url: string
-  sort_order: number
-}
-
 type Popup = {
   type: 'success' | 'error' | 'warning'
   title: string
@@ -116,8 +108,6 @@ export default function AdminPage() {
   const [editingShopDetails, setEditingShopDetails] = useState(false)
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
-  const [productImages, setProductImages] = useState<Record<string, ProductImage[]>>({})
-  const [existingImages, setExistingImages] = useState<ProductImage[]>([])
   const [product, setProduct] = useState<typeof emptyProduct>(emptyProduct)
   const [pricing, setPricing] = useState<PricingDetails>(emptyPricing)
   const [chargeTypes, setChargeTypes] = useState<string[]>([])
@@ -201,7 +191,7 @@ export default function AdminPage() {
         return
       }
 
-      const [s, c, p, pi, r, ct] = await Promise.all([
+      const [s, c, p, r, ct] = await Promise.all([
         supabase
           .from('shop_settings')
           .select('*')
@@ -217,11 +207,6 @@ export default function AdminPage() {
           .from('products')
           .select('*')
           .order('created_at', { ascending: false }),
-
-        supabase
-          .from('product_images')
-          .select('id, product_id, storage_path, public_url, sort_order')
-          .order('sort_order', { ascending: true }),
 
         supabase
           .from('metal_rates')
@@ -256,13 +241,6 @@ export default function AdminPage() {
           errorText(p.error)
         )
 
-      if (pi.error)
-        showPopup(
-          'error',
-          'Product Photos Load Failed',
-          errorText(pi.error)
-        )
-
       if (r.error)
         showPopup(
           'error',
@@ -280,21 +258,6 @@ export default function AdminPage() {
       setSettings(s.data as ShopSettings | null)
       setCategories((c.data as Category[]) ?? [])
       setProducts((p.data as Product[]) ?? [])
-
-      const imageMap: Record<string, ProductImage[]> = {}
-      for (const image of (pi.data as ProductImage[]) ?? []) {
-        const productId = String(image.product_id)
-        if (!imageMap[productId]) imageMap[productId] = []
-        imageMap[productId].push({
-          ...image,
-          id: String(image.id),
-          product_id: productId,
-          storage_path: String(image.storage_path ?? ''),
-          public_url: String(image.public_url ?? ''),
-          sort_order: Number(image.sort_order ?? 0),
-        })
-      }
-      setProductImages(imageMap)
 
       if (r.data) {
         setRates({
@@ -630,7 +593,6 @@ export default function AdminPage() {
     setSlugManuallyEdited(false)
     setAutoSlug(true)
     setImageFiles([])
-    setExistingImages([])
 
     imagePreviews.forEach(preview =>
       URL.revokeObjectURL(preview)
@@ -1252,32 +1214,6 @@ export default function AdminPage() {
           pricing_details?: PricingDetails
         }
       ).pricing_details
-
-    const { data: savedImages, error: savedImagesError } = await supabase
-      .from('product_images')
-      .select('id, product_id, storage_path, public_url, sort_order')
-      .eq('product_id', String(p.id))
-      .order('sort_order', { ascending: true })
-
-    if (savedImagesError) {
-      showPopup(
-        'error',
-        'Product Photos Load Failed',
-        errorText(savedImagesError)
-      )
-      setExistingImages([])
-    } else {
-      setExistingImages(
-        ((savedImages as ProductImage[]) ?? []).map(image => ({
-          ...image,
-          id: String(image.id),
-          product_id: String(image.product_id),
-          storage_path: String(image.storage_path ?? ''),
-          public_url: String(image.public_url ?? ''),
-          sort_order: Number(image.sort_order ?? 0),
-        }))
-      )
-    }
 
     setSlugManuallyEdited(true)
     setAutoSlug(false)
@@ -3282,41 +3218,6 @@ export default function AdminPage() {
                   )}
                 </div>
 
-                {product.id && existingImages.length > 0 && (
-                  <div className="mt-4">
-                    <p className="text-xs font-medium uppercase tracking-[0.15em] text-muted-foreground">
-                      Existing photos
-                    </p>
-                    <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-                      {existingImages.map((image, index) => (
-                        <div
-                          key={image.id}
-                          className="relative overflow-hidden rounded-xl border bg-secondary"
-                        >
-                          {image.public_url ? (
-                            <img
-                              src={image.public_url}
-                              alt={`${product.name || 'Product'} photo ${index + 1}`}
-                              className="aspect-square w-full object-cover"
-                              loading="lazy"
-                            />
-                          ) : (
-                            <div className="flex aspect-square items-center justify-center p-3 text-center text-xs text-muted-foreground">
-                              Photo URL unavailable
-                            </div>
-                          )}
-                          <div className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-1 text-xs text-white">
-                            {index + 1}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      These photos are already saved. Selecting new photos will add them; existing photos will stay safe.
-                    </p>
-                  </div>
-                )}
-
                 <input
                   className="mt-3 block w-full text-sm"
                   type="file"
@@ -3582,21 +3483,7 @@ export default function AdminPage() {
                     key={p.id}
                     className="flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
                   >
-                    <div className="flex min-w-0 items-center gap-4">
-                      {productImages[String(p.id)]?.[0]?.public_url ? (
-                        <img
-                          src={productImages[String(p.id)][0].public_url}
-                          alt={`${p.name} product photo`}
-                          className="size-16 shrink-0 rounded-lg border object-cover"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <div className="flex size-16 shrink-0 items-center justify-center rounded-lg border bg-secondary text-[10px] text-muted-foreground">
-                          No photo
-                        </div>
-                      )}
-
-                      <div className="min-w-0">
+                    <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="font-medium">
                           {p.name}
@@ -3644,7 +3531,6 @@ export default function AdminPage() {
                         Delete
                       </button>
                     </div>
-                  </div>
                   </div>
                 ))
               )}
