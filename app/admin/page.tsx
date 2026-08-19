@@ -40,18 +40,17 @@ type PricingDetails = {
   other_charges: OtherRow[]
 }
 
-type ProductImage = {
-  id: string
-  product_id: string
-  storage_path: string
-  public_url: string
-  sort_order: number
-}
-
 type Popup = {
   type: 'success' | 'error' | 'warning'
   title: string
   message: string
+}
+
+type ExistingImage = {
+  id: string
+  public_url: string
+  storage_path: string
+  sort_order: number
 }
 
 const emptyProduct = {
@@ -65,6 +64,7 @@ const emptyProduct = {
   price: '',
   purity: '',
   description: '',
+  stock_quantity: 1,
   is_available: true,
   is_featured: false,
 }
@@ -102,20 +102,6 @@ function money(value: number) {
   })}`
 }
 
-function imageUrl(supabase: any, image: Partial<ProductImage>) {
-  const savedUrl = String(image.public_url ?? '').trim()
-  if (savedUrl) return savedUrl
-
-  const storagePath = String(image.storage_path ?? '').trim()
-  if (!storagePath) return ''
-
-  const { data } = supabase.storage
-    .from(BUCKET)
-    .getPublicUrl(storagePath)
-
-  return data?.publicUrl ?? ''
-}
-
 export default function AdminPage() {
   const router = useRouter()
   const supabase = createClient()
@@ -130,8 +116,6 @@ export default function AdminPage() {
   const [editingShopDetails, setEditingShopDetails] = useState(false)
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
-  const [productImages, setProductImages] = useState<Record<string, ProductImage[]>>({})
-  const [existingImages, setExistingImages] = useState<ProductImage[]>([])
   const [product, setProduct] = useState<typeof emptyProduct>(emptyProduct)
   const [pricing, setPricing] = useState<PricingDetails>(emptyPricing)
   const [chargeTypes, setChargeTypes] = useState<string[]>([])
@@ -147,6 +131,8 @@ export default function AdminPage() {
   // MULTIPLE IMAGE SYSTEM
   const [imageFiles, setImageFiles] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
+  const [existingImages, setExistingImages] = useState<ExistingImage[]>([])
+  const [productImageMap, setProductImageMap] = useState<Record<string, ExistingImage[]>>({})
 
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
@@ -215,7 +201,7 @@ export default function AdminPage() {
         return
       }
 
-      const [s, c, p, pi, r, ct] = await Promise.all([
+      const [s, c, p, r, ct, images] = await Promise.all([
         supabase
           .from('shop_settings')
           .select('*')
@@ -233,11 +219,6 @@ export default function AdminPage() {
           .order('created_at', { ascending: false }),
 
         supabase
-          .from('product_images')
-          .select('id, product_id, storage_path, public_url, sort_order')
-          .order('sort_order', { ascending: true }),
-
-        supabase
           .from('metal_rates')
           .select('gold_24k, gold_22k, silver')
           .eq('id', 1)
@@ -247,6 +228,11 @@ export default function AdminPage() {
           .from('other_charge_types')
           .select('name')
           .order('name'),
+
+        supabase
+          .from('product_images')
+          .select('id, product_id, public_url, storage_path, sort_order')
+          .order('sort_order', { ascending: true }),
       ])
 
       if (s.error)
@@ -270,13 +256,6 @@ export default function AdminPage() {
           errorText(p.error)
         )
 
-      if (pi.error)
-        showPopup(
-          'error',
-          'Product Photos Load Failed',
-          errorText(pi.error)
-        )
-
       if (r.error)
         showPopup(
           'error',
@@ -291,24 +270,36 @@ export default function AdminPage() {
           errorText(ct.error)
         )
 
+      if (images.error)
+        showPopup(
+          'error',
+          'Product Images Load Failed',
+          errorText(images.error)
+        )
+
+      const imageMap: Record<string, ExistingImage[]> = {}
+      for (const row of (images.data ?? []) as Array<{
+        id: string
+        product_id: string
+        public_url: string
+        storage_path: string
+        sort_order: number | null
+      }>) {
+        const productId = String(row.product_id)
+        if (!imageMap[productId]) imageMap[productId] = []
+        imageMap[productId].push({
+          id: String(row.id),
+          public_url: row.public_url,
+          storage_path: row.storage_path,
+          sort_order: row.sort_order ?? 0,
+        })
+      }
+
+      setProductImageMap(imageMap)
+
       setSettings(s.data as ShopSettings | null)
       setCategories((c.data as Category[]) ?? [])
       setProducts((p.data as Product[]) ?? [])
-
-      const imageMap: Record<string, ProductImage[]> = {}
-      for (const image of (pi.data as ProductImage[]) ?? []) {
-        const productId = String(image.product_id)
-        if (!imageMap[productId]) imageMap[productId] = []
-        imageMap[productId].push({
-          ...image,
-          id: String(image.id),
-          product_id: productId,
-          storage_path: String(image.storage_path ?? ''),
-          public_url: imageUrl(supabase, image),
-          sort_order: Number(image.sort_order ?? 0),
-        })
-      }
-      setProductImages(imageMap)
 
       if (r.data) {
         setRates({
@@ -1018,8 +1009,17 @@ export default function AdminPage() {
         description:
           product.description.trim() || null,
 
+        stock_quantity:
+          Math.max(
+            0,
+            Math.floor(
+              num(product.stock_quantity)
+            )
+          ),
+
         is_available:
-          product.is_available,
+          product.is_available &&
+          num(product.stock_quantity) > 0,
 
         is_featured:
           product.is_featured,
@@ -1267,32 +1267,6 @@ export default function AdminPage() {
         }
       ).pricing_details
 
-    const { data: savedImages, error: savedImagesError } = await supabase
-      .from('product_images')
-      .select('id, product_id, storage_path, public_url, sort_order')
-      .eq('product_id', String(p.id))
-      .order('sort_order', { ascending: true })
-
-    if (savedImagesError) {
-      showPopup(
-        'error',
-        'Product Photos Load Failed',
-        errorText(savedImagesError)
-      )
-      setExistingImages([])
-    } else {
-      setExistingImages(
-        ((savedImages as ProductImage[]) ?? []).map(image => ({
-          ...image,
-          id: String(image.id),
-          product_id: String(image.product_id),
-          storage_path: String(image.storage_path ?? ''),
-          public_url: imageUrl(supabase, image),
-          sort_order: Number(image.sort_order ?? 0),
-        }))
-      )
-    }
-
     setSlugManuallyEdited(true)
     setAutoSlug(false)
 
@@ -1303,6 +1277,23 @@ export default function AdminPage() {
 
     setImageFiles([])
     setImagePreviews([])
+
+    const savedImages = productImageMap[String(p.id)] ?? []
+    setExistingImages(savedImages)
+
+    const existingStockQuantity =
+      Math.max(
+        0,
+        Math.floor(
+          num(
+            (
+              p as Product & {
+                stock_quantity?: number | null
+              }
+            ).stock_quantity ?? 1
+          )
+        )
+      )
 
     setProduct({
       ...emptyProduct,
@@ -1338,8 +1329,12 @@ export default function AdminPage() {
       description:
         p.description ?? '',
 
+      stock_quantity:
+        existingStockQuantity,
+
       is_available:
-        p.is_available,
+        Boolean(p.is_available) &&
+        existingStockQuantity > 0,
 
       is_featured:
         p.is_featured,
@@ -1401,6 +1396,92 @@ export default function AdminPage() {
 
       behavior: 'smooth',
     })
+  }
+
+  async function markOneSold(
+    id: string
+  ) {
+    setBusy(true)
+
+    try {
+      const { data: current, error: readError } =
+        await supabase
+          .from('products')
+          .select('name, stock_quantity, is_available')
+          .eq('id', id)
+          .single()
+
+      if (readError || !current) {
+        showPopup(
+          'error',
+          'Could Not Update Stock',
+          errorText(
+            readError,
+            'The product could not be found.'
+          )
+        )
+        return
+      }
+
+      const currentQuantity = Math.max(
+        0,
+        Math.floor(
+          num(
+            current.stock_quantity ?? 1
+          )
+        )
+      )
+
+      if (currentQuantity <= 0) {
+        showPopup(
+          'warning',
+          'Stock Already Empty',
+          `${current.name} has 0 PCS remaining.`
+        )
+        return
+      }
+
+      const nextQuantity =
+        currentQuantity - 1
+
+      const { error: updateError } =
+        await supabase
+          .from('products')
+          .update({
+            stock_quantity:
+              nextQuantity,
+            is_available:
+              nextQuantity > 0,
+            updated_at:
+              new Date().toISOString(),
+          })
+          .eq('id', id)
+
+      if (updateError) {
+        showPopup(
+          'error',
+          'Sale Update Failed',
+          errorText(updateError)
+        )
+        return
+      }
+
+      await load()
+
+      showPopup(
+        'success',
+        '1 PCS Sold',
+        `${current.name}: ${nextQuantity} PCS remaining.`
+      )
+    } catch (error) {
+      showPopup(
+        'error',
+        'Stock Update Error',
+        errorText(error)
+      )
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function removeProduct(
@@ -2215,6 +2296,38 @@ export default function AdminPage() {
                       })
                     }
                   />
+                </label>
+
+                <label className="text-sm font-medium">
+                  Stock Quantity (PCS)
+
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    className="mt-1 w-full rounded-md border px-3 py-2"
+                    value={
+                      product.stock_quantity
+                    }
+                    onChange={e =>
+                      setProduct({
+                        ...product,
+                        stock_quantity:
+                          Math.max(
+                            0,
+                            Math.floor(
+                              num(
+                                e.target.value
+                              )
+                            )
+                          ),
+                      })
+                    }
+                  />
+
+                  <span className="mt-1 block text-xs font-normal text-muted-foreground">
+                    This is the current quantity in stock. Use “Mark 1 Sold” below after a sale.
+                  </span>
                 </label>
 
                 <label className="text-sm font-medium">
@@ -3296,41 +3409,6 @@ export default function AdminPage() {
                   )}
                 </div>
 
-                {product.id && existingImages.length > 0 && (
-                  <div className="mt-4">
-                    <p className="text-xs font-medium uppercase tracking-[0.15em] text-muted-foreground">
-                      Existing photos
-                    </p>
-                    <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-                      {existingImages.map((image, index) => (
-                        <div
-                          key={image.id}
-                          className="relative overflow-hidden rounded-xl border bg-secondary"
-                        >
-                          {image.public_url ? (
-                            <img
-                              src={image.public_url}
-                              alt={`${product.name || 'Product'} photo ${index + 1}`}
-                              className="aspect-square w-full object-cover"
-                              loading="lazy"
-                            />
-                          ) : (
-                            <div className="flex aspect-square items-center justify-center p-3 text-center text-xs text-muted-foreground">
-                              Photo URL unavailable
-                            </div>
-                          )}
-                          <div className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-1 text-xs text-white">
-                            {index + 1}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      These photos are already saved. Selecting new photos will add them; existing photos will stay safe.
-                    </p>
-                  </div>
-                )}
-
                 <input
                   className="mt-3 block w-full text-sm"
                   type="file"
@@ -3344,6 +3422,33 @@ export default function AdminPage() {
                 <p className="mt-2 text-xs text-muted-foreground">
                   Select multiple JPG, PNG, WebP or AVIF images. Maximum 8 MB per image.
                 </p>
+
+                {/* EXISTING SAVED PHOTOS */}
+                {existingImages.length > 0 && (
+                  <div className="mt-4">
+                    <p className="mb-2 text-xs font-medium text-muted-foreground">
+                      Saved product photos
+                    </p>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                      {existingImages.map((image, index) => (
+                        <div
+                          key={image.id}
+                          className="overflow-hidden rounded-xl border bg-secondary"
+                        >
+                          <img
+                            src={image.public_url}
+                            alt={`${product.name || 'Product'} saved photo ${index + 1}`}
+                            className="aspect-square w-full object-cover"
+                            loading="lazy"
+                          />
+                          <div className="px-2 py-1 text-center text-[11px] text-muted-foreground">
+                            Saved photo {index + 1}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* IMAGE PREVIEWS */}
 
@@ -3596,16 +3701,16 @@ export default function AdminPage() {
                     key={p.id}
                     className="flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
                   >
-                    <div className="flex min-w-0 items-center gap-4">
-                      {productImages[String(p.id)]?.[0]?.public_url ? (
+                    <div className="flex min-w-0 items-start gap-4">
+                      {productImageMap[String(p.id)]?.[0]?.public_url ? (
                         <img
-                          src={productImages[String(p.id)][0].public_url}
-                          alt={`${p.name} product photo`}
-                          className="size-16 shrink-0 rounded-lg border object-cover"
+                          src={productImageMap[String(p.id)][0].public_url}
+                          alt={p.name || 'Product'}
+                          className="size-20 shrink-0 rounded-xl border object-cover"
                           loading="lazy"
                         />
                       ) : (
-                        <div className="flex size-16 shrink-0 items-center justify-center rounded-lg border bg-secondary text-[10px] text-muted-foreground">
+                        <div className="flex size-20 shrink-0 items-center justify-center rounded-xl border bg-secondary text-[10px] text-muted-foreground">
                           No photo
                         </div>
                       )}
@@ -3639,26 +3744,73 @@ export default function AdminPage() {
                           ? money(num(p.price))
                           : 'Price on request'}
                       </p>
+
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold">
+                          Stock:{' '}
+                          {Math.max(
+                            0,
+                            Math.floor(
+                              num(
+                                (
+                                  p as Product & {
+                                    stock_quantity?: number | null
+                                  }
+                                ).stock_quantity ?? 1
+                              )
+                            )
+                          )}{' '}
+                          PCS
+                        </span>
+                      </div>
                     </div>
 
-                    <div className="flex shrink-0 gap-2">
+                    <div className="flex shrink-0 flex-wrap gap-2">
                       <button
                         type="button"
+                        disabled={
+                          busy ||
+                          Math.max(
+                            0,
+                            Math.floor(
+                              num(
+                                (
+                                  p as Product & {
+                                    stock_quantity?: number | null
+                                  }
+                                ).stock_quantity ?? 1
+                              )
+                            )
+                          ) <= 0
+                        }
+                        onClick={() =>
+                          markOneSold(String(p.id))
+                        }
+                        className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Mark 1 Sold
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={busy}
                         onClick={() => editProduct(p)}
-                        className="rounded-md border px-3 py-1.5 text-sm hover:bg-secondary"
+                        className="rounded-md border px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50"
                       >
                         Edit
                       </button>
 
                       <button
                         type="button"
-                        onClick={() => removeProduct(String(p.id))}
-                        className="rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
+                        disabled={busy}
+                        onClick={() =>
+                          removeProduct(String(p.id))
+                        }
+                        className="rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
                       >
                         Delete
                       </button>
                     </div>
-                  </div>
                   </div>
                 ))
               )}
