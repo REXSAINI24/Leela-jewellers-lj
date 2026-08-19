@@ -48,6 +48,16 @@ type ProductImage = {
   sort_order: number
 }
 
+type StockHistoryRow = {
+  id: string
+  product_id: string
+  action: 'sale' | 'add' | 'remove' | 'edit' | 'initial'
+  quantity_change: number
+  quantity_after: number
+  note: string | null
+  created_at: string
+}
+
 type Popup = {
   type: 'success' | 'error' | 'warning'
   title: string
@@ -156,6 +166,9 @@ export default function AdminPage() {
   const [editingCategoryName, setEditingCategoryName] = useState('')
   const [newChargeType, setNewChargeType] = useState('')
   const [popup, setPopup] = useState<Popup | null>(null)
+  const [stockHistory, setStockHistory] = useState<StockHistoryRow[]>([])
+  const [historyProduct, setHistoryProduct] = useState<{ id: string; name: string } | null>(null)
+  const [historyBusy, setHistoryBusy] = useState(false)
 
   // PRODUCT LIST CONTROLS
   const [productSearch, setProductSearch] = useState('')
@@ -1105,6 +1118,20 @@ export default function AdminPage() {
         return
       }
 
+      let previousStockQuantity: number | null = null
+
+      if (product.id) {
+        const { data: previousProduct } = await supabase
+          .from('products')
+          .select('stock_quantity, is_available')
+          .eq('id', product.id)
+          .maybeSingle()
+
+        if (previousProduct) {
+          previousStockQuantity = Math.max(0, Math.floor(num(previousProduct.stock_quantity ?? (previousProduct.is_available ? 1 : 0))))
+        }
+      }
+
       const result = product.id
         ? await supabase
             .from('products')
@@ -1139,6 +1166,19 @@ export default function AdminPage() {
 
       const productId =
         String(result.data.id)
+
+      const savedStockQuantity = Math.max(0, Math.floor(num(product.stock_quantity)))
+      if (previousStockQuantity === null) {
+        await recordStockHistory(productId, 'initial', savedStockQuantity, savedStockQuantity, 'Initial stock quantity')
+      } else if (savedStockQuantity !== previousStockQuantity) {
+        await recordStockHistory(
+          productId,
+          'edit',
+          savedStockQuantity - previousStockQuantity,
+          savedStockQuantity,
+          `Stock changed from ${previousStockQuantity} PCS to ${savedStockQuantity} PCS while editing product`
+        )
+      }
 
       // ==========================================
       // MULTIPLE PRODUCT IMAGE UPLOAD
@@ -1438,6 +1478,109 @@ export default function AdminPage() {
     })
   }
 
+  async function recordStockHistory(
+    productId: string,
+    action: StockHistoryRow['action'],
+    quantityChange: number,
+    quantityAfter: number,
+    note: string
+  ) {
+    const { error } = await supabase.from('stock_history').insert({
+      product_id: productId,
+      action,
+      quantity_change: quantityChange,
+      quantity_after: quantityAfter,
+      note,
+    })
+
+    if (error) {
+      console.error('Stock history record failed:', error)
+    }
+  }
+
+  async function adjustStock(id: string, delta: number) {
+    setBusy(true)
+
+    try {
+      const { data: current, error: readError } = await supabase
+        .from('products')
+        .select('name, stock_quantity, is_available')
+        .eq('id', id)
+        .single()
+
+      if (readError || !current) {
+        showPopup('error', 'Could Not Update Stock', errorText(readError, 'The product could not be found.'))
+        return
+      }
+
+      const currentQuantity = Math.max(0, Math.floor(num(current.stock_quantity ?? (current.is_available ? 1 : 0))))
+      const nextQuantity = Math.max(0, currentQuantity + delta)
+
+      if (delta < 0 && currentQuantity <= 0) {
+        showPopup('warning', 'Stock Already Empty', `${current.name} has 0 PCS remaining.`)
+        return
+      }
+
+      const action: StockHistoryRow['action'] = delta > 0 ? 'add' : 'remove'
+      const word = delta > 0 ? 'add' : 'remove'
+      if (!confirm(`${delta > 0 ? 'Add' : 'Remove'} ${Math.abs(delta)} PCS ${word === 'add' ? 'to' : 'from'} "${current.name}"?\n\nStock will change from ${currentQuantity} PCS to ${nextQuantity} PCS.`)) {
+        return
+      }
+
+      const { error: updateError } = await supabase
+        .from('products')
+        .update({
+          stock_quantity: nextQuantity,
+          is_available: nextQuantity > 0,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+
+      if (updateError) {
+        showPopup('error', 'Stock Update Failed', errorText(updateError))
+        return
+      }
+
+      await recordStockHistory(
+        id,
+        action,
+        delta,
+        nextQuantity,
+        delta > 0 ? `Added ${Math.abs(delta)} PCS` : `Removed ${Math.abs(delta)} PCS`
+      )
+
+      await load()
+      showPopup('success', 'Stock Updated', `${current.name}: ${nextQuantity} PCS remaining.`)
+    } catch (error) {
+      showPopup('error', 'Stock Update Error', errorText(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function openStockHistory(id: string, name: string) {
+    setHistoryBusy(true)
+    setHistoryProduct({ id, name })
+
+    try {
+      const { data, error } = await supabase
+        .from('stock_history')
+        .select('id, product_id, action, quantity_change, quantity_after, note, created_at')
+        .eq('product_id', id)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        showPopup('error', 'History Could Not Load', errorText(error))
+        setHistoryProduct(null)
+        return
+      }
+
+      setStockHistory((data as StockHistoryRow[]) ?? [])
+    } finally {
+      setHistoryBusy(false)
+    }
+  }
+
   async function markProductSold(id: string) {
     setBusy(true)
 
@@ -1498,6 +1641,14 @@ export default function AdminPage() {
         )
         return
       }
+
+      await recordStockHistory(
+        id,
+        'sale',
+        -1,
+        nextQuantity,
+        '1 PCS marked as sold'
+      )
 
       await load()
 
@@ -3863,22 +4014,30 @@ export default function AdminPage() {
 
                       <button
                         type="button"
-                        onClick={() => editProduct(p)}
-                        className="rounded-md border px-3 py-1.5 text-sm hover:bg-secondary"
+                        onClick={() => adjustStock(String(p.id), 1)}
+                        disabled={busy}
+                        className="rounded-md border border-green-200 px-3 py-1.5 text-sm text-green-800 hover:bg-green-50 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        Edit
+                        +1 PCS
                       </button>
 
-                      {p.is_available && (
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => markProductSold(String(p.id))}
-                          className="rounded-md border border-amber-300 px-3 py-1.5 text-sm text-amber-800 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          Mark 1 Sold
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => adjustStock(String(p.id), -1)}
+                        disabled={busy || num((p as Product & { stock_quantity?: number | null }).stock_quantity ?? (p.is_available ? 1 : 0)) <= 0}
+                        className="rounded-md border border-orange-200 px-3 py-1.5 text-sm text-orange-800 hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        -1 PCS
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => openStockHistory(String(p.id), String(p.name))}
+                        disabled={historyBusy}
+                        className="rounded-md border border-slate-200 px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50"
+                      >
+                        History
+                      </button>
 
                       <button
                         type="button"
@@ -3894,6 +4053,44 @@ export default function AdminPage() {
               )}
             </div>
           </section>
+
+          {historyProduct && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setHistoryProduct(null)}>
+              <div className="w-full max-w-2xl rounded-xl border bg-background p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+                <div className="mb-4 flex items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-semibold">Stock History</h2>
+                    <p className="text-sm text-muted-foreground">{historyProduct.name}</p>
+                  </div>
+                  <button type="button" onClick={() => setHistoryProduct(null)} className="rounded-md border px-3 py-1.5 text-sm hover:bg-secondary">Close</button>
+                </div>
+
+                {historyBusy ? (
+                  <p className="py-8 text-center text-sm text-muted-foreground">Loading history...</p>
+                ) : stockHistory.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-muted-foreground">No stock history available yet.</p>
+                ) : (
+                  <div className="max-h-[55vh] overflow-auto rounded-lg border">
+                    {stockHistory.map(row => (
+                      <div key={row.id} className="flex items-center justify-between gap-4 border-b p-3 last:border-b-0">
+                        <div className="min-w-0">
+                          <p className="font-medium capitalize">{row.action === 'sale' ? 'Sold' : row.action === 'add' ? 'Stock Added' : row.action === 'remove' ? 'Stock Removed' : row.action === 'edit' ? 'Edited' : 'Initial Stock'}</p>
+                          <p className="text-xs text-muted-foreground">{row.note || 'Stock update'}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{new Date(row.created_at).toLocaleString('en-IN')}</p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className={cn('font-semibold', row.quantity_change > 0 ? 'text-green-700' : row.quantity_change < 0 ? 'text-red-700' : '')}>
+                            {row.quantity_change > 0 ? '+' : ''}{row.quantity_change} PCS
+                          </p>
+                          <p className="text-xs text-muted-foreground">Balance: {row.quantity_after} PCS</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
         </div>
       </main>
