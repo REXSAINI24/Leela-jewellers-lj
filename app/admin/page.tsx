@@ -57,6 +57,7 @@ const emptyProduct = {
   price: '',
   purity: '',
   description: '',
+  stock_quantity: 1,
   is_available: true,
   is_featured: false,
 }
@@ -966,8 +967,17 @@ export default function AdminPage() {
         description:
           product.description.trim() || null,
 
+        stock_quantity:
+          Math.max(
+            0,
+            Math.floor(
+              num(product.stock_quantity)
+            )
+          ),
+
         is_available:
-          product.is_available,
+          product.is_available &&
+          num(product.stock_quantity) > 0,
 
         is_featured:
           product.is_featured,
@@ -1226,6 +1236,20 @@ export default function AdminPage() {
     setImageFiles([])
     setImagePreviews([])
 
+    const existingStockQuantity =
+      Math.max(
+        0,
+        Math.floor(
+          num(
+            (
+              p as Product & {
+                stock_quantity?: number | null
+              }
+            ).stock_quantity ?? 1
+          )
+        )
+      )
+
     setProduct({
       ...emptyProduct,
 
@@ -1260,8 +1284,12 @@ export default function AdminPage() {
       description:
         p.description ?? '',
 
+      stock_quantity:
+        existingStockQuantity,
+
       is_available:
-        p.is_available,
+        Boolean(p.is_available) &&
+        existingStockQuantity > 0,
 
       is_featured:
         p.is_featured,
@@ -1323,6 +1351,92 @@ export default function AdminPage() {
 
       behavior: 'smooth',
     })
+  }
+
+  async function markOneSold(
+    id: string
+  ) {
+    setBusy(true)
+
+    try {
+      const { data: current, error: readError } =
+        await supabase
+          .from('products')
+          .select('name, stock_quantity, is_available')
+          .eq('id', id)
+          .single()
+
+      if (readError || !current) {
+        showPopup(
+          'error',
+          'Could Not Update Stock',
+          errorText(
+            readError,
+            'The product could not be found.'
+          )
+        )
+        return
+      }
+
+      const currentQuantity = Math.max(
+        0,
+        Math.floor(
+          num(
+            current.stock_quantity ?? 1
+          )
+        )
+      )
+
+      if (currentQuantity <= 0) {
+        showPopup(
+          'warning',
+          'Stock Already Empty',
+          `${current.name} has 0 PCS remaining.`
+        )
+        return
+      }
+
+      const nextQuantity =
+        currentQuantity - 1
+
+      const { error: updateError } =
+        await supabase
+          .from('products')
+          .update({
+            stock_quantity:
+              nextQuantity,
+            is_available:
+              nextQuantity > 0,
+            updated_at:
+              new Date().toISOString(),
+          })
+          .eq('id', id)
+
+      if (updateError) {
+        showPopup(
+          'error',
+          'Sale Update Failed',
+          errorText(updateError)
+        )
+        return
+      }
+
+      await load()
+
+      showPopup(
+        'success',
+        '1 PCS Sold',
+        `${current.name}: ${nextQuantity} PCS remaining.`
+      )
+    } catch (error) {
+      showPopup(
+        'error',
+        'Stock Update Error',
+        errorText(error)
+      )
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function removeProduct(
@@ -2137,6 +2251,38 @@ export default function AdminPage() {
                       })
                     }
                   />
+                </label>
+
+                <label className="text-sm font-medium">
+                  Stock Quantity (PCS)
+
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    className="mt-1 w-full rounded-md border px-3 py-2"
+                    value={
+                      product.stock_quantity
+                    }
+                    onChange={e =>
+                      setProduct({
+                        ...product,
+                        stock_quantity:
+                          Math.max(
+                            0,
+                            Math.floor(
+                              num(
+                                e.target.value
+                              )
+                            )
+                          ),
+                      })
+                    }
+                  />
+
+                  <span className="mt-1 block text-xs font-normal text-muted-foreground">
+                    This is the current quantity in stock. Use “Mark 1 Sold” below after a sale.
+                  </span>
                 </label>
 
                 <label className="text-sm font-medium">
@@ -3512,21 +3658,69 @@ export default function AdminPage() {
                           ? money(num(p.price))
                           : 'Price on request'}
                       </p>
+
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold">
+                          Stock:{' '}
+                          {Math.max(
+                            0,
+                            Math.floor(
+                              num(
+                                (
+                                  p as Product & {
+                                    stock_quantity?: number | null
+                                  }
+                                ).stock_quantity ?? 1
+                              )
+                            )
+                          )}{' '}
+                          PCS
+                        </span>
+                      </div>
                     </div>
 
-                    <div className="flex shrink-0 gap-2">
+                    <div className="flex shrink-0 flex-wrap gap-2">
                       <button
                         type="button"
+                        disabled={
+                          busy ||
+                          Math.max(
+                            0,
+                            Math.floor(
+                              num(
+                                (
+                                  p as Product & {
+                                    stock_quantity?: number | null
+                                  }
+                                ).stock_quantity ?? 1
+                              )
+                            )
+                          ) <= 0
+                        }
+                        onClick={() =>
+                          markOneSold(String(p.id))
+                        }
+                        className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Mark 1 Sold
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={busy}
                         onClick={() => editProduct(p)}
-                        className="rounded-md border px-3 py-1.5 text-sm hover:bg-secondary"
+                        className="rounded-md border px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50"
                       >
                         Edit
                       </button>
 
                       <button
                         type="button"
-                        onClick={() => removeProduct(String(p.id))}
-                        className="rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
+                        disabled={busy}
+                        onClick={() =>
+                          removeProduct(String(p.id))
+                        }
+                        className="rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
                       >
                         Delete
                       </button>
