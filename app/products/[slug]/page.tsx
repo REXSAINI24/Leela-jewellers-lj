@@ -309,7 +309,11 @@ export default async function ProductDetailPage({
    * We identify them by having no metal weight and having a
    * direct product.price saved in Supabase.
    */
-  const directPrice = num(product.price)
+  const directPrice =
+    num(product.price) > 0
+      ? num(product.price)
+      : num(product.rate)
+
   const isPiecePriceProduct =
     netMetalWeight <= 0 && directPrice > 0
 
