@@ -2,7 +2,11 @@
 
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Search, X } from 'lucide-react'
+import {
+  Search,
+  X,
+  SlidersHorizontal,
+} from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import type { Category } from '@/lib/types'
@@ -18,6 +22,12 @@ export function CatalogFilters({
   const activeCategory =
     searchParams.get('category') ?? ''
 
+  const activeAvailability =
+    searchParams.get('availability') ?? 'all'
+
+  const activeSort =
+    searchParams.get('sort') ?? 'newest'
+
   const [search, setSearch] = useState(
     searchParams.get('search') ?? '',
   )
@@ -26,9 +36,6 @@ export function CatalogFilters({
    * ============================================================
    * FIND GOLD / SILVER CATEGORIES
    * ============================================================
-   *
-   * Hum existing categories ko hi use kar rahe hain.
-   * Database mein koi nayi category/table nahi banani.
    */
 
   const goldCategory = categories.find((category) =>
@@ -94,6 +101,52 @@ export function CatalogFilters({
     )
   }
 
+  /*
+   * ============================================================
+   * AVAILABILITY SELECT
+   * ============================================================
+   */
+
+  function selectAvailability(
+    value: string,
+  ) {
+    const params = new URLSearchParams(
+      searchParams.toString(),
+    )
+
+    if (value && value !== 'all') {
+      params.set('availability', value)
+    } else {
+      params.delete('availability')
+    }
+
+    router.replace(
+      `/products?${params.toString()}`,
+    )
+  }
+
+  /*
+   * ============================================================
+   * SORT SELECT
+   * ============================================================
+   */
+
+  function selectSort(value: string) {
+    const params = new URLSearchParams(
+      searchParams.toString(),
+    )
+
+    if (value && value !== 'newest') {
+      params.set('sort', value)
+    } else {
+      params.delete('sort')
+    }
+
+    router.replace(
+      `/products?${params.toString()}`,
+    )
+  }
+
   return (
     <div className="flex flex-col gap-5">
 
@@ -140,6 +193,16 @@ export function CatalogFilters({
 
           <div className="flex gap-2 overflow-x-auto pb-1">
 
+            <FilterChip
+              label="All"
+              active={
+                activeCategory === ''
+              }
+              onClick={() =>
+                selectCategory('')
+              }
+            />
+
             {goldCategory && (
               <FilterChip
                 label="Gold"
@@ -170,17 +233,101 @@ export function CatalogFilters({
               />
             )}
 
-            <FilterChip
-              label="All"
-              active={activeCategory === ''}
-              onClick={() =>
-                selectCategory('')
-              }
-            />
-
           </div>
         </div>
       )}
+
+      {/* ======================================================
+          AVAILABILITY
+      ====================================================== */}
+
+      <div>
+        <p className="mb-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+          Availability
+        </p>
+
+        <div className="flex gap-2 overflow-x-auto pb-1">
+
+          <FilterChip
+            label="All"
+            active={
+              activeAvailability === 'all'
+            }
+            onClick={() =>
+              selectAvailability('all')
+            }
+          />
+
+          <FilterChip
+            label="Available"
+            active={
+              activeAvailability ===
+              'available'
+            }
+            onClick={() =>
+              selectAvailability(
+                'available',
+              )
+            }
+          />
+
+          <FilterChip
+            label="Out of Stock"
+            active={
+              activeAvailability === 'out'
+            }
+            onClick={() =>
+              selectAvailability('out')
+            }
+          />
+
+        </div>
+      </div>
+
+      {/* ======================================================
+          SORT
+      ====================================================== */}
+
+      <div>
+        <p className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+          <SlidersHorizontal className="size-3.5" />
+          Sort By
+        </p>
+
+        <div className="flex gap-2 overflow-x-auto pb-1">
+
+          <FilterChip
+            label="Newest"
+            active={
+              activeSort === 'newest'
+            }
+            onClick={() =>
+              selectSort('newest')
+            }
+          />
+
+          <FilterChip
+            label="Price: Low → High"
+            active={
+              activeSort === 'price_low'
+            }
+            onClick={() =>
+              selectSort('price_low')
+            }
+          />
+
+          <FilterChip
+            label="Price: High → Low"
+            active={
+              activeSort === 'price_high'
+            }
+            onClick={() =>
+              selectSort('price_high')
+            }
+          />
+
+        </div>
+      </div>
 
       {/* ======================================================
           ALL CATEGORIES
@@ -195,7 +342,9 @@ export function CatalogFilters({
 
           <FilterChip
             label="All Categories"
-            active={activeCategory === ''}
+            active={
+              activeCategory === ''
+            }
             onClick={() =>
               selectCategory('')
             }
