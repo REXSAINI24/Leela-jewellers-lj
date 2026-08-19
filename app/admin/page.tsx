@@ -25,6 +25,10 @@ type OtherRow = {
   price_per_unit: string
 }
 
+type AdminProduct = Product & {
+  stock_quantity?: number | null
+}
+
 type PricingDetails = {
   gross_weight: string
   stone_weight: string
@@ -46,13 +50,6 @@ type Popup = {
   message: string
 }
 
-type ExistingProductImage = {
-  id: string
-  storage_path: string
-  public_url: string
-  sort_order: number
-}
-
 const emptyProduct = {
   id: '',
   name: '',
@@ -64,9 +61,9 @@ const emptyProduct = {
   price: '',
   purity: '',
   description: '',
+  stock_quantity: '1',
   is_available: true,
   is_featured: false,
-  stock_quantity: '1',
 }
 
 const emptyPricing: PricingDetails = {
@@ -110,8 +107,7 @@ export default function AdminPage() {
   const [authorized, setAuthorized] = useState(false)
   const [settings, setSettings] = useState<ShopSettings | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
-  const [products, setProducts] = useState<Product[]>([])
-  const [productThumbnails, setProductThumbnails] = useState<Record<string, string>>({})
+  const [products, setProducts] = useState<AdminProduct[]>([])
   const [product, setProduct] = useState<typeof emptyProduct>(emptyProduct)
   const [pricing, setPricing] = useState<PricingDetails>(emptyPricing)
   const [chargeTypes, setChargeTypes] = useState<string[]>([])
@@ -127,7 +123,6 @@ export default function AdminPage() {
   // MULTIPLE IMAGE SYSTEM
   const [imageFiles, setImageFiles] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
-  const [existingImages, setExistingImages] = useState<ExistingProductImage[]>([])
 
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
@@ -262,30 +257,7 @@ export default function AdminPage() {
 
       setSettings(s.data as ShopSettings | null)
       setCategories((c.data as Category[]) ?? [])
-      setProducts((p.data as Product[]) ?? [])
-
-      const loadedProducts = (p.data as Product[]) ?? []
-      if (loadedProducts.length > 0) {
-        const { data: imageRows, error: imageRowsError } = await supabase
-          .from('product_images')
-          .select('product_id, public_url, sort_order')
-          .in('product_id', loadedProducts.map(item => item.id))
-          .order('sort_order', { ascending: true })
-
-        if (imageRowsError) {
-          showPopup('error', 'Product Photos Load Failed', errorText(imageRowsError))
-        } else {
-          const thumbnails: Record<string, string> = {}
-          for (const row of imageRows ?? []) {
-            if (row.public_url && !thumbnails[String(row.product_id)]) {
-              thumbnails[String(row.product_id)] = row.public_url
-            }
-          }
-          setProductThumbnails(thumbnails)
-        }
-      } else {
-        setProductThumbnails({})
-      }
+      setProducts((p.data as AdminProduct[]) ?? [])
 
       if (r.data) {
         setRates({
@@ -332,29 +304,29 @@ export default function AdminPage() {
     [product.name]
   )
 
+  const getStockQuantity = (p: AdminProduct) =>
+    Math.max(0, Math.floor(num(p.stock_quantity ?? 1)))
+
+  const availableProductCount = products.filter(
+    p => getStockQuantity(p) > 0
+  ).length
+
+  const outOfStockProductCount = products.filter(
+    p => getStockQuantity(p) <= 0
+  ).length
+
+  const lowStockProducts = products.filter(p => {
+    const qty = getStockQuantity(p)
+    return qty > 0 && qty <= 2
+  })
+
+  const totalStockPieces = products.reduce(
+    (sum, p) => sum + getStockQuantity(p),
+    0
+  )
+
   // Filter + sort the products shown in the admin product list.
   // This is only a frontend list control; it does not change the database.
-  const dashboardStats = useMemo(() => {
-    const total = products.length
-    const available = products.filter(
-      p => p.is_available && num(p.stock_quantity) > 0,
-    ).length
-    const outOfStock = products.filter(
-      p => !p.is_available || num(p.stock_quantity) <= 0,
-    ).length
-    const featured = products.filter(p => p.is_featured).length
-    const lowStock = products
-      .filter(
-        p =>
-          p.is_available &&
-          num(p.stock_quantity) > 0 &&
-          num(p.stock_quantity) <= 2,
-      )
-      .sort((a, b) => num(a.stock_quantity) - num(b.stock_quantity))
-
-    return { total, available, outOfStock, featured, lowStock }
-  }, [products])
-
   const filteredProducts = useMemo(() => {
     const search = productSearch.trim().toLowerCase()
 
@@ -370,10 +342,13 @@ export default function AdminPage() {
         !productCategoryFilter ||
         p.category_id === productCategoryFilter
 
+      const stockQuantity = getStockQuantity(p)
+
       const matchesStatus =
         productStatusFilter === 'all' ||
-        (productStatusFilter === 'available' && p.is_available && num(p.stock_quantity) > 0) ||
-        (productStatusFilter === 'out_of_stock' && (!p.is_available || num(p.stock_quantity) <= 0)) ||
+        (productStatusFilter === 'available' && stockQuantity > 0) ||
+        (productStatusFilter === 'unavailable' && stockQuantity <= 0) ||
+        (productStatusFilter === 'low_stock' && stockQuantity > 0 && stockQuantity <= 2) ||
         (productStatusFilter === 'featured' && p.is_featured)
 
       return matchesSearch && matchesCategory && matchesStatus
@@ -642,7 +617,6 @@ export default function AdminPage() {
     setSlugManuallyEdited(false)
     setAutoSlug(true)
     setImageFiles([])
-    setExistingImages([])
 
     imagePreviews.forEach(preview =>
       URL.revokeObjectURL(preview)
@@ -986,7 +960,7 @@ export default function AdminPage() {
     setBusy(true)
 
     try {
-      const payload = {
+      const payload: any = {
         name: product.name.trim(),
 
         slug: (
@@ -1014,16 +988,19 @@ export default function AdminPage() {
         description:
           product.description.trim() || null,
 
+        stock_quantity:
+          Math.max(
+            0,
+            Math.floor(
+              num(product.stock_quantity)
+            )
+          ),
+
         is_available:
-          product.is_available && num(product.stock_quantity) > 0,
+          num(product.stock_quantity) > 0,
 
         is_featured:
           product.is_featured,
-
-        stock_quantity: Math.max(
-          0,
-          Math.floor(num(product.stock_quantity))
-        ),
 
         gross_weight:
           grossWeight || null,
@@ -1206,7 +1183,7 @@ export default function AdminPage() {
                   publicData.publicUrl,
 
                 sort_order:
-                  existingImages.length + index,
+                  index,
               })
 
           if (imageInsert.error) {
@@ -1279,19 +1256,6 @@ export default function AdminPage() {
     setImageFiles([])
     setImagePreviews([])
 
-    const { data: currentImages, error: currentImagesError } = await supabase
-      .from('product_images')
-      .select('id, storage_path, public_url, sort_order')
-      .eq('product_id', p.id)
-      .order('sort_order', { ascending: true })
-
-    if (currentImagesError) {
-      showPopup('error', 'Product Photos Load Failed', errorText(currentImagesError))
-      setExistingImages([])
-    } else {
-      setExistingImages((currentImages ?? []) as ExistingProductImage[])
-    }
-
     setProduct({
       ...emptyProduct,
 
@@ -1326,14 +1290,24 @@ export default function AdminPage() {
       description:
         p.description ?? '',
 
+      stock_quantity:
+        String(
+          Math.max(
+            0,
+            Math.floor(
+              num(
+                p.stock_quantity ??
+                (p.is_available ? 1 : 0)
+              )
+            )
+          )
+        ),
+
       is_available:
-        p.is_available,
+        getStockQuantity(p) > 0,
 
       is_featured:
         p.is_featured,
-
-      stock_quantity:
-        String(Math.max(0, Math.floor(num((p as Product).stock_quantity)))),
     })
 
     if (raw) {
@@ -1394,78 +1368,30 @@ export default function AdminPage() {
     })
   }
 
-  async function removeExistingImage(image: ExistingProductImage) {
-    if (!product.id) return
+  async function markOneSold(p: AdminProduct) {
+    const current = getStockQuantity(p)
 
-    if (!confirm('Delete this product photo?\n\nThis will permanently remove the photo from storage.')) {
-      return
-    }
-
-    setBusy(true)
-
-    try {
-      const storageDelete = await supabase.storage
-        .from(BUCKET)
-        .remove([image.storage_path])
-
-      if (storageDelete.error) {
-        showPopup('error', 'Photo Delete Failed', errorText(storageDelete.error))
-        return
-      }
-
-      const { error } = await supabase
-        .from('product_images')
-        .delete()
-        .eq('id', image.id)
-        .eq('product_id', product.id)
-
-      if (error) {
-        showPopup('error', 'Photo Record Delete Failed', errorText(error))
-        return
-      }
-
-      setExistingImages(prev => prev.filter(item => item.id !== image.id))
-      await load()
-
-      showPopup('success', 'Photo Deleted', 'The product photo was removed successfully.')
-    } catch (error) {
-      showPopup('error', 'Photo Delete Failed', errorText(error))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function markOneSold(p: Product) {
-    const currentStock = Math.max(
-      0,
-      Math.floor(num(p.stock_quantity))
-    )
-
-    if (currentStock <= 0) {
+    if (current <= 0) {
       showPopup(
         'warning',
         'Already Out of Stock',
-        'This product already has 0 PCS available.'
+        `${p.name} already has 0 pieces in stock.`
       )
       return
     }
 
-    if (!confirm(`Mark 1 PCS of "${p.name}" as sold?\n\nStock will change from ${currentStock} PCS to ${currentStock - 1} PCS.`)) {
-      return
-    }
+    const nextQuantity = Math.max(0, current - 1)
 
     setBusy(true)
 
     try {
-      const nextStock = currentStock - 1
-
       const { error } = await supabase
         .from('products')
         .update({
-          stock_quantity: nextStock,
-          is_available: nextStock > 0,
+          stock_quantity: nextQuantity,
+          is_available: nextQuantity > 0,
           updated_at: new Date().toISOString(),
-        })
+        } as any)
         .eq('id', p.id)
 
       if (error) {
@@ -1481,15 +1407,15 @@ export default function AdminPage() {
 
       showPopup(
         'success',
-        nextStock > 0 ? 'Stock Updated' : 'Product Sold Out',
-        nextStock > 0
-          ? `"${p.name}" now has ${nextStock} PCS available.`
-          : `"${p.name}" is now Out of Stock.`
+        'Stock Updated',
+        nextQuantity > 0
+          ? `${p.name}: 1 piece marked as sold. ${nextQuantity} PCS remaining.`
+          : `${p.name}: 1 piece marked as sold. The product is now Out of Stock.`
       )
     } catch (error) {
       showPopup(
         'error',
-        'Stock Update Failed',
+        'Stock Update Error',
         errorText(error)
       )
     } finally {
@@ -2348,6 +2274,88 @@ export default function AdminPage() {
                   </div>
                 </label>
               </div>
+
+              {/* STOCK / INVENTORY */}
+
+              <section className="rounded-xl border border-gold/30 bg-secondary/20 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-gold">
+                      Inventory
+                    </p>
+                    <h3 className="font-serif text-xl font-semibold text-primary">
+                      Stock Quantity
+                    </h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Enter how many pieces you currently have. 0 automatically means Out of Stock.
+                    </p>
+                  </div>
+
+                  <div className={cn(
+                    'rounded-full px-3 py-1.5 text-xs font-semibold',
+                    num(product.stock_quantity) <= 0
+                      ? 'bg-red-100 text-red-800'
+                      : num(product.stock_quantity) <= 2
+                        ? 'bg-amber-100 text-amber-800'
+                        : 'bg-green-100 text-green-800'
+                  )}>
+                    {num(product.stock_quantity) <= 0
+                      ? 'Out of Stock'
+                      : num(product.stock_quantity) <= 2
+                        ? `Low Stock · ${Math.floor(num(product.stock_quantity))} PCS`
+                        : `Available · ${Math.floor(num(product.stock_quantity))} PCS`}
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <label className="text-sm font-medium">
+                    Available Pieces (PCS)
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      inputMode="numeric"
+                      className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-lg font-semibold"
+                      value={product.stock_quantity}
+                      onChange={e => {
+                        const value = e.target.value
+                        const quantity =
+                          value === ''
+                            ? ''
+                            : String(
+                                Math.max(
+                                  0,
+                                  Math.floor(
+                                    Number(value) || 0
+                                  )
+                                )
+                              )
+
+                        setProduct(prev => ({
+                          ...prev,
+                          stock_quantity: quantity,
+                          is_available:
+                            quantity !== '' &&
+                            num(quantity) > 0,
+                        }))
+                      }}
+                    />
+                  </label>
+
+                  <div className="rounded-md border bg-background px-4 py-3">
+                    <p className="text-xs text-muted-foreground">
+                      Customer Website Status
+                    </p>
+                    <p className="mt-1 text-lg font-semibold">
+                      {num(product.stock_quantity) <= 0
+                        ? '🔴 Out of Stock'
+                        : num(product.stock_quantity) <= 2
+                          ? `🟠 Low Stock · ${Math.floor(num(product.stock_quantity))} PCS`
+                          : `🟢 Available · ${Math.floor(num(product.stock_quantity))} PCS`}
+                    </p>
+                  </div>
+                </div>
+              </section>
 
               {/* WEIGHT DETAILS */}
 
@@ -3301,45 +3309,7 @@ export default function AdminPage() {
                   Select multiple JPG, PNG, WebP or AVIF images. Maximum 8 MB per image.
                 </p>
 
-                {/* EXISTING PRODUCT PHOTOS */}
-
-                {product.id && existingImages.length > 0 && (
-                  <div className="mt-4">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      Current product photos — {existingImages.length} saved
-                    </p>
-
-                    <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-                      {existingImages.map((image, index) => (
-                        <div
-                          key={image.id}
-                          className="relative overflow-hidden rounded-xl border bg-secondary"
-                        >
-                          <img
-                            src={image.public_url}
-                            alt={`Current product photo ${index + 1}`}
-                            className="aspect-square w-full object-contain"
-                          />
-
-                          <div className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-1 text-xs text-white">
-                            Saved {index + 1}
-                          </div>
-
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => removeExistingImage(image)}
-                            className="absolute right-2 top-2 rounded-full bg-red-600/90 px-2 py-1 text-xs text-white hover:bg-red-700 disabled:opacity-50"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* NEW IMAGE PREVIEWS */}
+                {/* IMAGE PREVIEWS */}
 
                 {imagePreviews.length >
                   0 && (
@@ -3388,64 +3358,25 @@ export default function AdminPage() {
 
               </div>
 
-              {/* STOCK / AVAILABLE / FEATURED */}
+              {/* STOCK STATUS / FEATURED */}
 
-              <section className="rounded-xl border p-4">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="text-sm font-medium">
-                    Available Pieces (PCS)
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      className="mt-1 w-full rounded-md border px-3 py-2"
-                      value={product.stock_quantity}
-                      onChange={e => {
-                        const value = Math.max(0, Math.floor(num(e.target.value)))
-                        setProduct(prev => ({
-                          ...prev,
-                          stock_quantity: String(value),
-                          is_available: value > 0 ? prev.is_available : false,
-                        }))
-                      }}
-                    />
-                    <span className="mt-1 block text-xs text-muted-foreground">
-                      0 PCS automatically saves the product as Out of Stock.
-                    </span>
-                  </label>
-
-                  <div className="rounded-md border bg-secondary/30 px-3 py-2">
-                    <p className="text-xs text-muted-foreground">Current Stock Status</p>
-                    <p className="mt-1 font-semibold">
-                      {num(product.stock_quantity) > 0 && product.is_available
-                        ? `Available · ${num(product.stock_quantity)} PCS`
-                        : 'Out of Stock'}
-                    </p>
-                  </div>
+              <div className="flex flex-wrap items-center gap-6">
+                <div className="text-sm">
+                  <span className="font-medium">Availability:</span>{' '}
+                  <span className={cn(
+                    'font-semibold',
+                    num(product.stock_quantity) > 0
+                      ? 'text-green-700'
+                      : 'text-red-700'
+                  )}>
+                    {num(product.stock_quantity) > 0
+                      ? `Available · ${Math.floor(num(product.stock_quantity))} PCS`
+                      : 'Out of Stock'}
+                  </span>
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    (automatically controlled by stock quantity)
+                  </span>
                 </div>
-              </section>
-
-              {/* AVAILABLE / FEATURED */}
-
-              <div className="flex flex-wrap gap-6">
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={
-                      product.is_available
-                    }
-                    onChange={e =>
-                      setProduct({
-                        ...product,
-                        is_available:
-                          e.target
-                            .checked,
-                      })
-                    }
-                  />
-
-                  Available
-                </label>
 
                 <label className="flex items-center gap-2 text-sm">
                   <input
@@ -3500,106 +3431,90 @@ export default function AdminPage() {
             </form>
           </section>
 
-          {/* DASHBOARD STOCK SUMMARY */}
+          {/* INVENTORY OVERVIEW */}
 
           <section className="mb-6 rounded-2xl border border-border bg-background p-5">
-            <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-gold">
-                Inventory Overview
-              </p>
-              <h2 className="mt-1 font-serif text-2xl font-semibold text-primary">
-                Stock Summary
-              </h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Quickly see your current product availability and low-stock items.
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-gold">
+                  Inventory Overview
+                </p>
+                <h2 className="font-serif text-2xl font-semibold text-primary">
+                  Stock Summary
+                </h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Quickly see your current product availability and low-stock items.
+                </p>
+              </div>
+
+              <p className="text-sm font-medium text-muted-foreground">
+                Total pieces in stock: <span className="text-foreground">{totalStockPieces}</span>
               </p>
             </div>
 
-            <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-              <div className="rounded-xl border bg-secondary/30 p-4">
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-xl border p-4">
                 <p className="text-xs text-muted-foreground">Total Products</p>
-                <p className="mt-1 text-2xl font-bold text-primary">
-                  {dashboardStats.total}
-                </p>
+                <p className="mt-1 text-2xl font-bold">{products.length}</p>
               </div>
 
               <div className="rounded-xl border border-green-200 bg-green-50 p-4">
                 <p className="text-xs text-green-700">Available</p>
-                <p className="mt-1 text-2xl font-bold text-green-800">
-                  {dashboardStats.available}
-                </p>
+                <p className="mt-1 text-2xl font-bold text-green-800">{availableProductCount}</p>
               </div>
 
               <div className="rounded-xl border border-red-200 bg-red-50 p-4">
                 <p className="text-xs text-red-700">Out of Stock</p>
-                <p className="mt-1 text-2xl font-bold text-red-800">
-                  {dashboardStats.outOfStock}
-                </p>
+                <p className="mt-1 text-2xl font-bold text-red-800">{outOfStockProductCount}</p>
               </div>
 
-              <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-4">
-                <p className="text-xs text-yellow-700">Featured</p>
-                <p className="mt-1 text-2xl font-bold text-yellow-800">
-                  {dashboardStats.featured}
+              <div className="rounded-xl border p-4">
+                <p className="text-xs text-muted-foreground">Featured</p>
+                <p className="mt-1 text-2xl font-bold">
+                  {products.filter(p => p.is_featured).length}
                 </p>
               </div>
             </div>
 
-            <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/50 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h3 className="font-semibold text-amber-900">
-                    Low Stock Products
-                  </h3>
-                  <p className="mt-1 text-xs text-amber-800">
-                    Products with 1–2 PCS remaining.
-                  </p>
-                </div>
-                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
-                  {dashboardStats.lowStock.length} item{dashboardStats.lowStock.length === 1 ? '' : 's'}
-                </span>
-              </div>
+            {lowStockProducts.length > 0 && (
+              <div className="mt-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-serif text-xl font-semibold text-primary">
+                      Low Stock Products
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Products with 1–2 PCS remaining.
+                    </p>
+                  </div>
 
-              {dashboardStats.lowStock.length > 0 ? (
+                  <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+                    {lowStockProducts.length} items
+                  </span>
+                </div>
+
                 <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {dashboardStats.lowStock.map(p => (
-                    <div
+                  {lowStockProducts.map(p => (
+                    <button
                       key={p.id}
-                      className="flex items-center gap-3 rounded-lg border bg-background p-3"
+                      type="button"
+                      onClick={() => editProduct(p)}
+                      className="flex items-center justify-between rounded-xl border p-3 text-left hover:bg-secondary/40"
                     >
-                      <div className="relative size-12 shrink-0 overflow-hidden rounded-md border bg-secondary">
-                        {productThumbnails[String(p.id)] ? (
-                          <img
-                            src={productThumbnails[String(p.id)]}
-                            alt={p.name}
-                            className="h-full w-full object-contain"
-                          />
-                        ) : (
-                          <div className="flex h-full items-center justify-center text-[9px] text-muted-foreground">
-                            No photo
-                          </div>
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">
-                          {p.name}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-semibold">{p.name}</span>
+                        <span className="block text-xs text-muted-foreground">
                           {p.sku || 'No SKU'}
-                        </p>
-                      </div>
-                      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-900">
-                        {num(p.stock_quantity)} PCS
+                        </span>
                       </span>
-                    </div>
+                      <span className="ml-3 shrink-0 text-sm font-bold text-amber-700">
+                        {getStockQuantity(p)} PCS
+                      </span>
+                    </button>
                   ))}
                 </div>
-              ) : (
-                <p className="mt-3 rounded-lg border border-dashed border-amber-200 bg-background p-4 text-center text-sm text-muted-foreground">
-                  No low-stock products right now. 👍
-                </p>
-              )}
-            </div>
+              </div>
+            )}
           </section>
 
           {/* PRODUCTS LIST */}
@@ -3660,7 +3575,8 @@ export default function AdminPage() {
                 >
                   <option value="all">All products</option>
                   <option value="available">Available</option>
-                  <option value="out_of_stock">Out of Stock</option>
+                  <option value="low_stock">Low Stock (1–2 PCS)</option>
+                  <option value="unavailable">Out of Stock</option>
                   <option value="featured">Featured</option>
                 </select>
               </label>
@@ -3729,62 +3645,49 @@ export default function AdminPage() {
                     key={p.id}
                     className="flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
                   >
-                    <div className="flex min-w-0 items-center gap-4">
-                      <div className="relative size-20 shrink-0 overflow-hidden rounded-lg border bg-secondary">
-                        {productThumbnails[String(p.id)] ? (
-                          <img
-                            src={productThumbnails[String(p.id)]}
-                            alt={p.name}
-                            className="h-full w-full object-contain"
-                          />
-                        ) : (
-                          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                            No photo
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-medium">{p.name}</p>
-                          {p.is_featured && (
-                            <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[11px] font-medium text-yellow-800">
-                              Featured
-                            </span>
-                          )}
-                          <span className={cn(
-                            'rounded-full px-2 py-0.5 text-[11px] font-medium',
-                            p.is_available && num(p.stock_quantity) > 0
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-red-100 text-red-800'
-                          )}>
-                            {p.is_available && num(p.stock_quantity) > 0
-                              ? `Available · ${num(p.stock_quantity)} PCS`
-                              : 'Out of Stock'}
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium">
+                          {p.name}
+                        </p>
+                        {p.is_featured && (
+                          <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[11px] font-medium text-yellow-800">
+                            Featured
                           </span>
-                        </div>
-
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {p.sku || 'No SKU'} · {p.purity || 'Purity not set'} · {p.weight ? `${p.weight} GM` : 'Weight not set'}
-                        </p>
-
-                        <p className="mt-1 text-sm font-medium">
-                          {p.price != null && num(p.price) > 0
-                            ? money(num(p.price))
-                            : 'Price on request'}
-                        </p>
+                        )}
+                        <span className={cn(
+                          'rounded-full px-2 py-0.5 text-[11px] font-medium',
+                          getStockQuantity(p) <= 0
+                            ? 'bg-red-100 text-red-800'
+                            : getStockQuantity(p) <= 2
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-green-100 text-green-800'
+                        )}>
+                          {getStockQuantity(p) <= 0
+                            ? 'Out of Stock'
+                            : getStockQuantity(p) <= 2
+                              ? `Low Stock · ${getStockQuantity(p)} PCS`
+                              : `Available · ${getStockQuantity(p)} PCS`}
+                        </span>
                       </div>
+
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {p.sku || 'No SKU'} · {p.purity || 'Purity not set'} · {p.weight ? `${p.weight} GM` : 'Weight not set'} · Stock: {getStockQuantity(p)} PCS
+                      </p>
+
+                      <p className="mt-1 text-sm font-medium">
+                        {p.price != null && num(p.price) > 0
+                          ? money(num(p.price))
+                          : 'Price on request'}
+                      </p>
                     </div>
 
-                    <div className="flex shrink-0 flex-wrap gap-2">
+                    <div className="flex shrink-0 flex-wrap justify-end gap-2">
                       <button
                         type="button"
-                        disabled={
-                          busy ||
-                          num(p.stock_quantity) <= 0
-                        }
                         onClick={() => markOneSold(p)}
-                        className="rounded-md border border-amber-200 px-3 py-1.5 text-sm text-amber-800 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={busy || getStockQuantity(p) <= 0}
+                        className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Mark 1 Sold
                       </button>
