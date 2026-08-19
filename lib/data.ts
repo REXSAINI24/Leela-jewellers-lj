@@ -60,8 +60,6 @@ function sortImages(
  * PRODUCT ESTIMATED PRICE
  * ============================================================
  *
- * Ye calculation Admin Panel ke pricing logic ke same hai:
- *
  * Metal Value
  * + Wastage / VA
  * + Making Charges
@@ -126,6 +124,10 @@ function calculateProductPrice(
       ? savedNetWeight
       : Math.max(grossWeight - stoneWeight, 0)
 
+  /*
+   * If product has no metal weight, it is a direct/piece-price
+   * product. Do not calculate it using today's metal rate.
+   */
   if (netWeight <= 0) {
     return null
   }
@@ -163,9 +165,9 @@ function calculateProductPrice(
     currentRate = 0
   }
 
-  // Daily metal rate is required before a customer-facing price
-  // can be calculated. If today's rate is blank/zero, show Enquire
-  // for price instead of using an old/manual product rate.
+  /*
+   * Weight-based product needs today's metal rate.
+   */
   if (currentRate <= 0) {
     return null
   }
@@ -326,7 +328,19 @@ function calculateProductPrice(
 }
 
 /*
- * Adds the calculated estimated price to products.
+ * ============================================================
+ * ADD ESTIMATED PRICES
+ * ============================================================
+ *
+ * IMPORTANT:
+ *
+ * Weight-based product:
+ *   calculated price available -> use calculated price
+ *
+ * Piece/direct-price product:
+ *   calculation returns null -> keep original product.price
+ *
+ * This makes piece products independent from daily metal rate.
  */
 async function addEstimatedPrices(
   products: ProductWithRelations[],
@@ -343,7 +357,17 @@ async function addEstimatedPrices(
 
     return {
       ...product,
-      price: estimatedPrice,
+
+      /*
+       * If metal-rate calculation is available,
+       * use it.
+       *
+       * Otherwise keep the original direct/piece price.
+       */
+      price:
+        estimatedPrice !== null
+          ? estimatedPrice
+          : product.price,
     }
   })
 }
@@ -458,6 +482,7 @@ export async function getProducts(
   /*
    * CATEGORY FILTER
    */
+
   if (params.category) {
     const { data: cat } = await supabase
       .from('categories')
@@ -476,6 +501,7 @@ export async function getProducts(
   /*
    * SEARCH
    */
+
   if (params.search) {
     query = query.or(
       `name.ilike.%${params.search}%,description.ilike.%${params.search}%,sku.ilike.%${params.search}%`,
