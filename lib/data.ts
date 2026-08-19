@@ -129,7 +129,11 @@ function calculateProductPrice(
    * product. Do not calculate it using today's metal rate.
    */
   if (netWeight <= 0) {
-    return null
+    const directPiecePrice = num(product.rate)
+
+    return directPiecePrice > 0
+      ? directPiecePrice
+      : product.price
   }
 
   /*
