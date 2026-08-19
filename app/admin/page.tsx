@@ -46,6 +46,13 @@ type Popup = {
   message: string
 }
 
+type ExistingProductImage = {
+  id: string
+  storage_path: string
+  public_url: string
+  sort_order: number
+}
+
 const emptyProduct = {
   id: '',
   name: '',
@@ -120,6 +127,7 @@ export default function AdminPage() {
   // MULTIPLE IMAGE SYSTEM
   const [imageFiles, setImageFiles] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
+  const [existingImages, setExistingImages] = useState<ExistingProductImage[]>([])
 
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
@@ -634,6 +642,7 @@ export default function AdminPage() {
     setSlugManuallyEdited(false)
     setAutoSlug(true)
     setImageFiles([])
+    setExistingImages([])
 
     imagePreviews.forEach(preview =>
       URL.revokeObjectURL(preview)
@@ -1197,7 +1206,7 @@ export default function AdminPage() {
                   publicData.publicUrl,
 
                 sort_order:
-                  index,
+                  existingImages.length + index,
               })
 
           if (imageInsert.error) {
@@ -1269,6 +1278,19 @@ export default function AdminPage() {
 
     setImageFiles([])
     setImagePreviews([])
+
+    const { data: currentImages, error: currentImagesError } = await supabase
+      .from('product_images')
+      .select('id, storage_path, public_url, sort_order')
+      .eq('product_id', p.id)
+      .order('sort_order', { ascending: true })
+
+    if (currentImagesError) {
+      showPopup('error', 'Product Photos Load Failed', errorText(currentImagesError))
+      setExistingImages([])
+    } else {
+      setExistingImages((currentImages ?? []) as ExistingProductImage[])
+    }
 
     setProduct({
       ...emptyProduct,
@@ -1370,6 +1392,47 @@ export default function AdminPage() {
 
       behavior: 'smooth',
     })
+  }
+
+  async function removeExistingImage(image: ExistingProductImage) {
+    if (!product.id) return
+
+    if (!confirm('Delete this product photo?\n\nThis will permanently remove the photo from storage.')) {
+      return
+    }
+
+    setBusy(true)
+
+    try {
+      const storageDelete = await supabase.storage
+        .from(BUCKET)
+        .remove([image.storage_path])
+
+      if (storageDelete.error) {
+        showPopup('error', 'Photo Delete Failed', errorText(storageDelete.error))
+        return
+      }
+
+      const { error } = await supabase
+        .from('product_images')
+        .delete()
+        .eq('id', image.id)
+        .eq('product_id', product.id)
+
+      if (error) {
+        showPopup('error', 'Photo Record Delete Failed', errorText(error))
+        return
+      }
+
+      setExistingImages(prev => prev.filter(item => item.id !== image.id))
+      await load()
+
+      showPopup('success', 'Photo Deleted', 'The product photo was removed successfully.')
+    } catch (error) {
+      showPopup('error', 'Photo Delete Failed', errorText(error))
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function markOneSold(p: Product) {
@@ -3238,7 +3301,45 @@ export default function AdminPage() {
                   Select multiple JPG, PNG, WebP or AVIF images. Maximum 8 MB per image.
                 </p>
 
-                {/* IMAGE PREVIEWS */}
+                {/* EXISTING PRODUCT PHOTOS */}
+
+                {product.id && existingImages.length > 0 && (
+                  <div className="mt-4">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Current product photos — {existingImages.length} saved
+                    </p>
+
+                    <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                      {existingImages.map((image, index) => (
+                        <div
+                          key={image.id}
+                          className="relative overflow-hidden rounded-xl border bg-secondary"
+                        >
+                          <img
+                            src={image.public_url}
+                            alt={`Current product photo ${index + 1}`}
+                            className="aspect-square w-full object-contain"
+                          />
+
+                          <div className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-1 text-xs text-white">
+                            Saved {index + 1}
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => removeExistingImage(image)}
+                            className="absolute right-2 top-2 rounded-full bg-red-600/90 px-2 py-1 text-xs text-white hover:bg-red-700 disabled:opacity-50"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* NEW IMAGE PREVIEWS */}
 
                 {imagePreviews.length >
                   0 && (
