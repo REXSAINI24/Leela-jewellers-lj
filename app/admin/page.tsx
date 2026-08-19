@@ -40,14 +40,6 @@ type PricingDetails = {
   other_charges: OtherRow[]
 }
 
-type ProductImage = {
-  id: string
-  product_id: string
-  storage_path: string
-  public_url: string
-  sort_order: number
-}
-
 type Popup = {
   type: 'success' | 'error' | 'warning'
   title: string
@@ -109,6 +101,11 @@ export default function AdminPage() {
   const [ready, setReady] = useState(false)
   const [authorized, setAuthorized] = useState(false)
   const [settings, setSettings] = useState<ShopSettings | null>(null)
+
+  // SHOP DETAILS UI
+  // Details are hidden by default to prevent accidental edits.
+  const [showShopDetails, setShowShopDetails] = useState(false)
+  const [editingShopDetails, setEditingShopDetails] = useState(false)
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [product, setProduct] = useState<typeof emptyProduct>(emptyProduct)
@@ -126,8 +123,6 @@ export default function AdminPage() {
   // MULTIPLE IMAGE SYSTEM
   const [imageFiles, setImageFiles] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
-  const [productImages, setProductImages] = useState<ProductImage[]>([])
-  const [existingProductImages, setExistingProductImages] = useState<ProductImage[]>([])
 
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
@@ -196,7 +191,7 @@ export default function AdminPage() {
         return
       }
 
-      const [s, c, p, pi, r, ct] = await Promise.all([
+      const [s, c, p, r, ct] = await Promise.all([
         supabase
           .from('shop_settings')
           .select('*')
@@ -212,11 +207,6 @@ export default function AdminPage() {
           .from('products')
           .select('*')
           .order('created_at', { ascending: false }),
-
-        supabase
-          .from('product_images')
-          .select('*')
-          .order('sort_order', { ascending: true }),
 
         supabase
           .from('metal_rates')
@@ -251,13 +241,6 @@ export default function AdminPage() {
           errorText(p.error)
         )
 
-      if (pi.error)
-        showPopup(
-          'error',
-          'Product Images Load Failed',
-          errorText(pi.error)
-        )
-
       if (r.error)
         showPopup(
           'error',
@@ -275,7 +258,6 @@ export default function AdminPage() {
       setSettings(s.data as ShopSettings | null)
       setCategories((c.data as Category[]) ?? [])
       setProducts((p.data as Product[]) ?? [])
-      setProductImages((pi.data as ProductImage[]) ?? [])
 
       if (r.data) {
         setRates({
@@ -617,7 +599,6 @@ export default function AdminPage() {
     )
 
     setImagePreviews([])
-    setExistingProductImages([])
   }
 
   function updatePricing<K extends keyof PricingDetails>(
@@ -764,10 +745,10 @@ export default function AdminPage() {
 
   async function saveSettings(
     e: FormEvent
-  ) {
+  ): Promise<boolean> {
     e.preventDefault()
 
-    if (!settings) return
+    if (!settings) return false
 
     setBusy(true)
 
@@ -795,7 +776,7 @@ export default function AdminPage() {
           'Shop Details Not Saved',
           errorText(error)
         )
-        return
+        return false
       }
 
       showPopup(
@@ -805,12 +786,14 @@ export default function AdminPage() {
       )
 
       router.refresh()
+      return true
     } catch (error) {
       showPopup(
         'error',
         'Shop Details Error',
         errorText(error)
       )
+      return false
     } finally {
       setBusy(false)
     }
@@ -1242,12 +1225,6 @@ export default function AdminPage() {
 
     setImageFiles([])
     setImagePreviews([])
-
-    setExistingProductImages(
-      productImages
-        .filter(image => String(image.product_id) === String(p.id))
-        .sort((a, b) => Number(a.sort_order) - Number(b.sort_order))
-    )
 
     setProduct({
       ...emptyProduct,
@@ -1704,75 +1681,178 @@ export default function AdminPage() {
           {/* SHOP DETAILS */}
 
           <section className="mb-6 rounded-2xl border border-border bg-background p-5">
-            <h2 className="font-serif text-2xl font-semibold text-primary">
-              Shop Details
-            </h2>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-gold">
+                  Store Information
+                </p>
+                <h2 className="font-serif text-2xl font-semibold text-primary">
+                  Shop Details
+                </h2>
+              </div>
 
-            <form
-              onSubmit={saveSettings}
-              className="mt-4 grid gap-4 md:grid-cols-2"
-            >
-              {settings && (
-                <>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowShopDetails((value) => !value)
+                  setEditingShopDetails(false)
+                }}
+                className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium transition hover:bg-secondary"
+              >
+                {showShopDetails ? 'Hide Shop Details' : 'View Shop Details'}
+              </button>
+            </div>
+
+            {showShopDetails && settings && !editingShopDetails && (
+              <div className="mt-5 rounded-xl border border-border bg-secondary/20 p-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Shop Name
+                    </p>
+                    <p className="mt-1 text-sm font-medium">
+                      {settings.shop_name || '—'}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Mobile Number
+                    </p>
+                    <p className="mt-1 text-sm font-medium">
+                      {settings.phone || '—'}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      WhatsApp Number
+                    </p>
+                    <p className="mt-1 text-sm font-medium">
+                      {settings.whatsapp_number || '—'}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Address
+                    </p>
+                    <p className="mt-1 text-sm font-medium">
+                      {settings.address || '—'}
+                    </p>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Google Maps URL
+                    </p>
+                    <p className="mt-1 break-all text-sm font-medium">
+                      {settings.google_maps_url || '—'}
+                    </p>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      About
+                    </p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm leading-6">
+                      {settings.about || '—'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-5 border-t border-border pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setEditingShopDetails(true)}
+                    className="rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground"
+                  >
+                    Edit Shop Details
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {showShopDetails && settings && editingShopDetails && (
+              <form
+                onSubmit={async (event) => {
+                  const saved = await saveSettings(event)
+                  if (saved) {
+                    setEditingShopDetails(false)
+                  }
+                }}
+                className="mt-5 rounded-xl border border-border bg-secondary/20 p-4"
+              >
+                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+                  You are editing shop information. Changes will affect the information shown across the website.
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
                   {([
                     ['shop_name', 'Shop name'],
                     ['phone', 'Mobile number'],
                     ['whatsapp_number', 'WhatsApp number'],
                     ['address', 'Address'],
                     ['google_maps_url', 'Google Maps URL'],
-                  ] as const).map(
-                    ([key, label]) => (
-                      <label
-                        key={key}
-                        className="text-sm font-medium"
-                      >
-                        {label}
+                  ] as const).map(([key, label]) => (
+                    <label
+                      key={key}
+                      className="text-sm font-medium"
+                    >
+                      {label}
 
-                        <input
-                          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2"
-                          value={
-                            (settings as any)[key] ??
-                            ''
-                          }
-                          onChange={e =>
-                            setSettings({
-                              ...settings,
-                              [key]:
-                                e.target.value,
-                            })
-                          }
-                        />
-                      </label>
-                    )
-                  )}
+                      <input
+                        className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2"
+                        value={(settings as any)[key] ?? ''}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            [key]: e.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                  ))}
 
                   <label className="text-sm font-medium md:col-span-2">
                     About
 
                     <textarea
                       className="mt-1 min-h-24 w-full rounded-md border border-border bg-background px-3 py-2"
-                      value={
-                        settings.about ?? ''
-                      }
-                      onChange={e =>
+                      value={settings.about ?? ''}
+                      onChange={(e) =>
                         setSettings({
                           ...settings,
-                          about:
-                            e.target.value,
+                          about: e.target.value,
                         })
                       }
                     />
                   </label>
-                </>
-              )}
+                </div>
 
-              <button
-                disabled={busy}
-                className="rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground md:w-fit"
-              >
-                Save shop details
-              </button>
-            </form>
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <button
+                    type="submit"
+                    disabled={busy}
+                    className="rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-60"
+                  >
+                    {busy ? 'Saving...' : 'Save Shop Details'}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setEditingShopDetails(false)
+                      load()
+                    }}
+                    className="rounded-md border border-border bg-background px-4 py-2.5 text-sm font-medium disabled:opacity-60"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
           </section>
 
           {/* METAL RATES */}
@@ -3152,36 +3232,7 @@ export default function AdminPage() {
                   Select multiple JPG, PNG, WebP or AVIF images. Maximum 8 MB per image.
                 </p>
 
-                {/* EXISTING SAVED PHOTOS */}
-
-                {existingProductImages.length > 0 && (
-                  <div className="mt-4">
-                    <p className="mb-2 text-xs font-medium text-muted-foreground">
-                      Existing Photos
-                    </p>
-
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-                      {existingProductImages.map((image, index) => (
-                        <div
-                          key={image.id}
-                          className="relative overflow-hidden rounded-xl border bg-secondary"
-                        >
-                          <img
-                            src={image.public_url}
-                            alt={`${product.name || 'Product'} photo ${index + 1}`}
-                            className="aspect-square w-full object-cover"
-                          />
-
-                          <div className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-1 text-xs text-white">
-                            Saved {index + 1}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* NEW IMAGE PREVIEWS */}
+                {/* IMAGE PREVIEWS */}
 
                 {imagePreviews.length >
                   0 && (
@@ -3432,28 +3483,6 @@ export default function AdminPage() {
                     key={p.id}
                     className="flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
                   >
-                    {(() => {
-                      const image = productImages.find(
-                        item => String(item.product_id) === String(p.id)
-                      )
-
-                      return (
-                        <div className="size-20 shrink-0 overflow-hidden rounded-lg border bg-secondary">
-                          {image?.public_url ? (
-                            <img
-                              src={image.public_url}
-                              alt={p.name}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <div className="flex h-full items-center justify-center px-2 text-center text-xs text-muted-foreground">
-                              No Photo
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })()}
-
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="font-medium">
