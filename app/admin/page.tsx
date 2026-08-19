@@ -1403,6 +1403,49 @@ export default function AdminPage() {
     })
   }
 
+  async function markProductSold(id: string) {
+    if (!confirm('Mark this product as sold?')) {
+      return
+    }
+
+    setBusy(true)
+
+    try {
+      const { error } = await supabase
+        .from('products')
+        .update({
+          is_available: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+
+      if (error) {
+        showPopup(
+          'error',
+          'Could Not Mark Product Sold',
+          errorText(error)
+        )
+        return
+      }
+
+      await load()
+
+      showPopup(
+        'success',
+        'Product Marked Sold',
+        'The product has been marked as sold and is now unavailable.'
+      )
+    } catch (error) {
+      showPopup(
+        'error',
+        'Mark Sold Error',
+        errorText(error)
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function removeProduct(
     id: string
   ) {
@@ -3649,6 +3692,17 @@ export default function AdminPage() {
                       >
                         Edit
                       </button>
+
+                      {p.is_available && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => markProductSold(String(p.id))}
+                          className="rounded-md border border-amber-300 px-3 py-1.5 text-sm text-amber-800 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Mark 1 Sold
+                        </button>
+                      )}
 
                       <button
                         type="button"
