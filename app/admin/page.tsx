@@ -4041,6 +4041,15 @@ export default function AdminPage() {
 
                       <button
                         type="button"
+                        onClick={() => editProduct(p)}
+                        disabled={busy}
+                        className="rounded-md border px-3 py-1.5 text-sm hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Edit
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={() => removeProduct(String(p.id))}
                         className="rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
                       >
