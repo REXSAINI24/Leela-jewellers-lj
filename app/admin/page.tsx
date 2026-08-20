@@ -25,6 +25,13 @@ type OtherRow = {
   price_per_unit: string
 }
 
+type ExistingProductImage = {
+  id: string
+  storage_path: string
+  public_url: string
+  sort_order: number
+}
+
 type PricingDetails = {
   pricing_mode: 'metal_rate' | 'piece'
   gross_weight: string
@@ -133,6 +140,7 @@ export default function AdminPage() {
   // MULTIPLE IMAGE SYSTEM
   const [imageFiles, setImageFiles] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
+  const [existingProductImages, setExistingProductImages] = useState<ExistingProductImage[]>([])
 
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
@@ -633,6 +641,7 @@ export default function AdminPage() {
     setSlugManuallyEdited(false)
     setAutoSlug(true)
     setImageFiles([])
+    setExistingProductImages([])
 
     imagePreviews.forEach(preview =>
       URL.revokeObjectURL(preview)
@@ -1273,6 +1282,25 @@ export default function AdminPage() {
 
     setImageFiles([])
     setImagePreviews([])
+
+    const { data: savedImages, error: savedImagesError } = await supabase
+      .from('product_images')
+      .select('id, storage_path, public_url, sort_order')
+      .eq('product_id', p.id)
+      .order('sort_order', { ascending: true })
+
+    if (savedImagesError) {
+      setExistingProductImages([])
+      showPopup(
+        'warning',
+        'Product Photos Load Failed',
+        errorText(savedImagesError)
+      )
+    } else {
+      setExistingProductImages(
+        (savedImages as ExistingProductImage[]) ?? []
+      )
+    }
 
     const existingNetWeight = raw
       ? num(raw.net_weight)
@@ -3641,7 +3669,36 @@ export default function AdminPage() {
                   Select multiple JPG, PNG, WebP or AVIF images. Maximum 8 MB per image.
                 </p>
 
-                {/* IMAGE PREVIEWS */}
+                {/* EXISTING SAVED PHOTOS */}
+
+                {existingProductImages.length > 0 && (
+                  <div className="mt-4">
+                    <p className="mb-2 text-xs font-medium text-muted-foreground">
+                      Existing Photos
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                      {existingProductImages.map((image, index) => (
+                        <div
+                          key={image.id}
+                          className="relative overflow-hidden rounded-xl border bg-secondary"
+                        >
+                          <img
+                            src={image.public_url}
+                            alt={`${product.name || 'Product'} photo ${index + 1}`}
+                            className="aspect-square w-full object-cover"
+                          />
+
+                          <div className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-1 text-xs text-white">
+                            Saved {index + 1}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* NEW IMAGE PREVIEWS */}
 
                 {imagePreviews.length >
                   0 && (
