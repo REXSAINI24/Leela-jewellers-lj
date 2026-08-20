@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
-import { createClient } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/client'
 
 export function VisitorTracker() {
   useEffect(() => {
@@ -10,8 +10,7 @@ export function VisitorTracker() {
         let visitorId = localStorage.getItem('leela_visitor_id')
 
         if (!visitorId) {
-          visitorId =
-            crypto.randomUUID()
+          visitorId = crypto.randomUUID()
 
           localStorage.setItem(
             'leela_visitor_id',
@@ -20,13 +19,10 @@ export function VisitorTracker() {
         }
 
         let sessionId =
-          sessionStorage.getItem(
-            'leela_session_id'
-          )
+          sessionStorage.getItem('leela_session_id')
 
         if (!sessionId) {
-          sessionId =
-            crypto.randomUUID()
+          sessionId = crypto.randomUUID()
 
           sessionStorage.setItem(
             'leela_session_id',
@@ -34,16 +30,14 @@ export function VisitorTracker() {
           )
         }
 
-        const supabase =
-          createClient()
+        const supabase = createClient()
 
         await supabase
           .from('website_visits')
           .insert({
             visitor_id: visitorId,
             session_id: sessionId,
-            page_path:
-              window.location.pathname,
+            page_path: window.location.pathname,
           })
       } catch {
         // Visitor tracking should never
