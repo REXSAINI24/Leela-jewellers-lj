@@ -309,11 +309,7 @@ export default async function ProductDetailPage({
    * We identify them by having no metal weight and having a
    * direct product.price saved in Supabase.
    */
-  const directPrice =
-    num(product.price) > 0
-      ? num(product.price)
-      : num(product.rate)
-
+  const directPrice = num(product.price)
   const isPiecePriceProduct =
     netMetalWeight <= 0 && directPrice > 0
 
@@ -849,34 +845,6 @@ export default async function ProductDetailPage({
                         </div>
                       )}
 
-                      {stoneCharges > 0 && (
-                        <div className="flex justify-between gap-4">
-                          <span className="text-muted-foreground">
-                            Stone Charges
-                          </span>
-
-                          <span className="font-medium">
-                            {money(
-                              stoneCharges
-                            )}
-                          </span>
-                        </div>
-                      )}
-
-                      {otherCharges > 0 && (
-                        <div className="flex justify-between gap-4">
-                          <span className="text-muted-foreground">
-                            Other Charges
-                          </span>
-
-                          <span className="font-medium">
-                            {money(
-                              otherCharges
-                            )}
-                          </span>
-                        </div>
-                      )}
-
                       <div className="my-2 border-t border-border/70" />
 
                       <div className="flex justify-between gap-4">
@@ -927,164 +895,8 @@ export default async function ProductDetailPage({
                 )}
               </div>
 
-              {/* ==================================================
-                  STONE DETAILS
-              ================================================== */}
-
-              {stoneRows.length > 0 && (
-                <div className="mt-6">
-
-                  <h2 className="font-serif text-xl font-semibold text-primary">
-                    Stone Details
-                  </h2>
-
-                  <div className="mt-3 space-y-2">
-
-                    {stoneRows.map(
-                      (stone) => {
-                        const rowTotal =
-                          num(stone.pcs) *
-                          num(
-                            stone.price_per_pc
-                          )
-
-                        return (
-                          <div
-                            key={stone.id}
-                            className="rounded-xl border border-border/70 p-4"
-                          >
-
-                            <div className="flex items-start justify-between gap-4">
-
-                              <div>
-
-                                {stone.stone_name && (
-                                  <p className="font-medium">
-                                    {
-                                      stone.stone_name
-                                    }
-                                  </p>
-                                )}
-
-                                <div className="mt-1 text-xs text-muted-foreground">
-
-                                  {stone.size && (
-                                    <span>
-                                      Size:{' '}
-                                      {
-                                        stone.size
-                                      }{' '}
-                                      ·{' '}
-                                    </span>
-                                  )}
-
-                                  {stone.quality && (
-                                    <span>
-                                      Quality:{' '}
-                                      {
-                                        stone.quality
-                                      }{' '}
-                                      ·{' '}
-                                    </span>
-                                  )}
-
-                                  <span>
-                                    {num(
-                                      stone.pcs
-                                    )}{' '}
-                                    PC
-                                  </span>
-
-                                </div>
-
-                              </div>
-
-                              <p className="font-medium">
-                                {money(
-                                  rowTotal
-                                )}
-                              </p>
-
-                            </div>
-
-                          </div>
-                        )
-                      }
-                    )}
-
-                  </div>
-
-                </div>
-              )}
-
-              {/* ==================================================
-                  OTHER CHARGES
-              ================================================== */}
-
-              {otherRows.length > 0 && (
-                <div className="mt-6">
-
-                  <h2 className="font-serif text-xl font-semibold text-primary">
-                    Other Charges
-                  </h2>
-
-                  <div className="mt-3 space-y-2">
-
-                    {otherRows.map(
-                      (charge) => {
-                        const rowTotal =
-                          num(
-                            charge.quantity
-                          ) *
-                          num(
-                            charge.price_per_unit
-                          )
-
-                        return (
-                          <div
-                            key={charge.id}
-                            className="flex items-center justify-between gap-4 rounded-xl border border-border/70 p-4"
-                          >
-
-                            <div>
-
-                              <p className="font-medium">
-                                {charge.charge_type ||
-                                  'Other'}
-                              </p>
-
-                              {charge.description && (
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  {
-                                    charge.description
-                                  }
-                                </p>
-                              )}
-
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                Qty:{' '}
-                                {num(
-                                  charge.quantity
-                                )}
-                              </p>
-
-                            </div>
-
-                            <p className="font-medium">
-                              {money(
-                                rowTotal
-                              )}
-                            </p>
-
-                          </div>
-                        )
-                      }
-                    )}
-
-                  </div>
-
-                </div>
-              )}
+              {/* Stone Details and Other Charges are intentionally hidden here.
+                  Their amounts remain included inside Price Calculation above. */}
 
               {/* ==================================================
                   DESCRIPTION
