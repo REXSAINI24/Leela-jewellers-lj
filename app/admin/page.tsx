@@ -122,7 +122,6 @@ export default function AdminPage() {
   const [ready, setReady] = useState(false)
   const [authorized, setAuthorized] = useState(false)
   const [settings, setSettings] = useState<ShopSettings | null>(null)
-  const [showShopDetails, setShowShopDetails] = useState(false)
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [productThumbnails, setProductThumbnails] = useState<Record<string, string>>({})
@@ -634,6 +633,67 @@ export default function AdminPage() {
     setImagePreviews(prev =>
       prev.filter((_, i) => i !== index)
     )
+  }
+
+  async function deleteExistingProductImage(image: ExistingProductImage) {
+    if (
+      !confirm(
+        'Delete this saved photo?\\n\\nThis photo will be permanently removed from the product.'
+      )
+    ) {
+      return
+    }
+
+    setBusy(true)
+
+    try {
+      if (image.storage_path) {
+        const storageDelete = await supabase.storage
+          .from(BUCKET)
+          .remove([image.storage_path])
+
+        if (storageDelete.error) {
+          showPopup(
+            'error',
+            'Photo Delete Failed',
+            errorText(storageDelete.error)
+          )
+          return
+        }
+      }
+
+      const { error } = await supabase
+        .from('product_images')
+        .delete()
+        .eq('id', image.id)
+
+      if (error) {
+        showPopup(
+          'error',
+          'Photo Delete Failed',
+          errorText(error)
+        )
+        return
+      }
+
+      setExistingProductImages(prev =>
+        prev.filter(item => item.id !== image.id)
+      )
+
+      showPopup(
+        'success',
+        'Photo Deleted',
+        'The selected product photo was deleted successfully.'
+      )
+    } catch (error) {
+      showPopup(
+        'error',
+        'Photo Delete Error',
+        errorText(error)
+      )
+    } finally {
+      setBusy(false)
+    }
   }
 
   function resetProduct() {
@@ -2131,93 +2191,75 @@ export default function AdminPage() {
           {/* SHOP DETAILS */}
 
           <section className="mb-6 rounded-2xl border border-border bg-background p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-gold">
-                  Store Information
-                </p>
-                <h2 className="font-serif text-2xl font-semibold text-primary">
-                  Shop Details
-                </h2>
-              </div>
+            <h2 className="font-serif text-2xl font-semibold text-primary">
+              Shop Details
+            </h2>
+
+            <form
+              onSubmit={saveSettings}
+              className="mt-4 grid gap-4 md:grid-cols-2"
+            >
+              {settings && (
+                <>
+                  {([
+                    ['shop_name', 'Shop name'],
+                    ['phone', 'Mobile number'],
+                    ['whatsapp_number', 'WhatsApp number'],
+                    ['address', 'Address'],
+                    ['google_maps_url', 'Google Maps URL'],
+                  ] as const).map(
+                    ([key, label]) => (
+                      <label
+                        key={key}
+                        className="text-sm font-medium"
+                      >
+                        {label}
+
+                        <input
+                          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2"
+                          value={
+                            (settings as any)[key] ??
+                            ''
+                          }
+                          onChange={e =>
+                            setSettings({
+                              ...settings,
+                              [key]:
+                                e.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                    )
+                  )}
+
+                  <label className="text-sm font-medium md:col-span-2">
+                    About
+
+                    <textarea
+                      className="mt-1 min-h-24 w-full rounded-md border border-border bg-background px-3 py-2"
+                      value={
+                        settings.about ?? ''
+                      }
+                      onChange={e =>
+                        setSettings({
+                          ...settings,
+                          about:
+                            e.target.value,
+                        })
+                      }
+                    />
+                  </label>
+                </>
+              )}
 
               <button
-                type="button"
-                onClick={() => setShowShopDetails(value => !value)}
-                className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium transition hover:bg-secondary"
+                disabled={busy}
+                className="rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground md:w-fit"
               >
-                {showShopDetails ? 'Hide Shop Details' : 'View Shop Details'}
+                Save shop details
               </button>
-            </div>
-
-            {showShopDetails && (
-              <form
-                onSubmit={saveSettings}
-                className="mt-5 grid gap-4 md:grid-cols-2"
-              >
-                {settings && (
-                  <>
-                    {([
-                      ['shop_name', 'Shop name'],
-                      ['phone', 'Mobile number'],
-                      ['whatsapp_number', 'WhatsApp number'],
-                      ['address', 'Address'],
-                      ['google_maps_url', 'Google Maps URL'],
-                    ] as const).map(
-                      ([key, label]) => (
-                        <label
-                          key={key}
-                          className="text-sm font-medium"
-                        >
-                          {label}
-
-                          <input
-                            className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2"
-                            value={
-                              (settings as any)[key] ??
-                              ''
-                            }
-                            onChange={e =>
-                              setSettings({
-                                ...settings,
-                                [key]:
-                                  e.target.value,
-                              })
-                            }
-                          />
-                        </label>
-                      )
-                    )}
-
-                    <label className="text-sm font-medium md:col-span-2">
-                      About
-
-                      <textarea
-                        className="mt-1 min-h-24 w-full rounded-md border border-border bg-background px-3 py-2"
-                        value={
-                          settings.about ?? ''
-                        }
-                        onChange={e =>
-                          setSettings({
-                            ...settings,
-                            about:
-                              e.target.value,
-                          })
-                        }
-                      />
-                    </label>
-                  </>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={busy}
-                  className="rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground md:w-fit"
-                >
-                  Save shop details
-                </button>
-              </form>
-            )}
+            </form>
           </section>
 
           {/* METAL RATES */}
@@ -3711,6 +3753,18 @@ export default function AdminPage() {
                           <div className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-1 text-xs text-white">
                             Saved {index + 1}
                           </div>
+
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() =>
+                              deleteExistingProductImage(image)
+                            }
+                            className="absolute right-2 top-2 rounded-full bg-red-600/90 px-2.5 py-1.5 text-xs font-medium text-white shadow hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            title="Delete photo"
+                          >
+                            Delete
+                          </button>
                         </div>
                       ))}
                     </div>
