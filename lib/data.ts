@@ -21,6 +21,7 @@ type PricingOther = {
 }
 
 type SavedPricing = {
+  pricing_mode?: 'metal_rate' | 'piece'
   gross_weight?: string | number
   stone_weight?: string | number
   net_weight?: string | number
@@ -125,15 +126,39 @@ function calculateProductPrice(
       : Math.max(grossWeight - stoneWeight, 0)
 
   /*
-   * If product has no metal weight, it is a direct/piece-price
-   * product. Do not calculate it using today's metal rate.
+   * ============================================================
+   * DIRECT / PIECE PRICE
+   * ============================================================
+   *
+   * Explicit pricing_mode is preferred. For older products that
+   * were created before pricing_mode existed, a product with no
+   * metal weight and a saved rate/price is treated as a piece-price
+   * product.
    */
-  if (netWeight <= 0) {
-    const directPiecePrice = num(product.rate)
+  const directPiecePrice =
+    num(product.price) > 0
+      ? num(product.price)
+      : num(product.rate)
 
+  const isPiecePriceProduct =
+    savedPricing?.pricing_mode === 'piece' ||
+    (!savedPricing?.pricing_mode &&
+      netWeight <= 0 &&
+      directPiecePrice > 0)
+
+  if (isPiecePriceProduct) {
     return directPiecePrice > 0
       ? directPiecePrice
-      : product.price
+      : null
+  }
+
+  /*
+   * Weight-based products require metal weight and today's metal
+   * rate. If either is unavailable, the customer will see
+   * Enquire for Price.
+   */
+  if (netWeight <= 0) {
+    return null
   }
 
   /*
@@ -371,7 +396,10 @@ async function addEstimatedPrices(
       price:
         estimatedPrice !== null
           ? estimatedPrice
-          : product.price,
+          : product.price ??
+            (product.rate && !product.weight
+              ? Number(product.rate)
+              : product.price),
     }
   })
 }
