@@ -1049,13 +1049,44 @@ export default function AdminPage() {
     setBusy(true)
 
     try {
+      const baseSlug = (
+        product.slug.trim() ||
+        slugify(product.name)
+      ).trim()
+
+      // Always make the slug unique before saving.
+      // If the base slug already belongs to another product, use
+      // -2, -3, -4, ... until an unused slug is found.
+      let uniqueSlug = baseSlug
+      let suffix = 2
+
+      while (uniqueSlug) {
+        const slugCheck = await supabase
+          .from('products')
+          .select('id')
+          .eq('slug', uniqueSlug)
+          .neq('id', product.id || '00000000-0000-0000-0000-000000000000')
+          .maybeSingle()
+
+        if (slugCheck.error) {
+          showPopup(
+            'error',
+            'Slug Check Failed',
+            errorText(slugCheck.error)
+          )
+          return
+        }
+
+        if (!slugCheck.data) break
+
+        uniqueSlug = `${baseSlug}-${suffix}`
+        suffix += 1
+      }
+
       const payload = {
         name: product.name.trim(),
 
-        slug: (
-          product.slug.trim() ||
-          slugify(product.name)
-        ).trim(),
+        slug: uniqueSlug,
 
         sku:
           product.sku.trim() || null,
@@ -1126,40 +1157,6 @@ export default function AdminPage() {
 
         updated_at:
           new Date().toISOString(),
-      }
-
-      const duplicateQuery =
-        product.id
-          ? await supabase
-              .from('products')
-              .select('id')
-              .eq('slug', payload.slug)
-              .neq('id', product.id)
-              .maybeSingle()
-          : await supabase
-              .from('products')
-              .select('id')
-              .eq('slug', payload.slug)
-              .maybeSingle()
-
-      if (duplicateQuery.error) {
-        showPopup(
-          'error',
-          'Slug Check Failed',
-          errorText(
-            duplicateQuery.error
-          )
-        )
-        return
-      }
-
-      if (duplicateQuery.data) {
-        showPopup(
-          'warning',
-          'Duplicate Slug',
-          'This slug is already used by another product.\n\nPlease edit the slug and try again.'
-        )
-        return
       }
 
       const result = product.id
@@ -1334,8 +1331,11 @@ export default function AdminPage() {
         }
       ).pricing_details
 
-    setSlugManuallyEdited(true)
-    setAutoSlug(false)
+    // Editing an existing product should keep the slug automatic by default.
+    // If the product name is changed, the slug will follow the new name.
+    // The slug field itself can still be edited manually at any time.
+    setSlugManuallyEdited(false)
+    setAutoSlug(true)
 
     // New selected images reset
     imagePreviews.forEach(preview =>
