@@ -26,7 +26,15 @@ type OtherRow = {
   price_per_unit: string
 }
 
+type ExistingProductImage = {
+  id: string
+  storage_path: string
+  public_url: string
+  sort_order: number
+}
+
 type PricingDetails = {
+  pricing_mode: 'metal_rate' | 'piece'
   gross_weight: string
   stone_weight: string
   net_weight: string
@@ -47,6 +55,17 @@ type Popup = {
   message: string
 }
 
+type StockHistoryRow = {
+  id: string | number
+  product_id: string
+  change_type: 'add' | 'remove' | 'sold' | 'set'
+  previous_stock: number
+  new_stock: number
+  quantity_change: number
+  note: string | null
+  created_at: string
+}
+
 const emptyProduct = {
   id: '',
   name: '',
@@ -60,9 +79,11 @@ const emptyProduct = {
   description: '',
   is_available: true,
   is_featured: false,
+  stock_quantity: '1',
 }
 
 const emptyPricing: PricingDetails = {
+  pricing_mode: 'metal_rate',
   gross_weight: '',
   stone_weight: '0',
   net_weight: '',
@@ -102,18 +123,17 @@ export default function AdminPage() {
   const [ready, setReady] = useState(false)
   const [authorized, setAuthorized] = useState(false)
   const [settings, setSettings] = useState<ShopSettings | null>(null)
-
-  // SHOP DETAILS UI
-  // Details are hidden by default to prevent accidental edits.
   const [showShopDetails, setShowShopDetails] = useState(false)
-  const [editingShopDetails, setEditingShopDetails] = useState(false)
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [productThumbnails, setProductThumbnails] = useState<Record<string, string>>({})
   const [product, setProduct] = useState<typeof emptyProduct>(emptyProduct)
   const [pricing, setPricing] = useState<PricingDetails>(emptyPricing)
   const [chargeTypes, setChargeTypes] = useState<string[]>([])
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false)
   const [autoSlug, setAutoSlug] = useState(true)
+  const [categorySearch, setCategorySearch] = useState('')
+  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false)
   const [rates, setRates] = useState({
     gold_24k: '',
     gold_22k: '',
@@ -124,6 +144,7 @@ export default function AdminPage() {
   // MULTIPLE IMAGE SYSTEM
   const [imageFiles, setImageFiles] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
+  const [existingProductImages, setExistingProductImages] = useState<ExistingProductImage[]>([])
 
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
@@ -132,6 +153,11 @@ export default function AdminPage() {
   const [editingCategoryName, setEditingCategoryName] = useState('')
   const [newChargeType, setNewChargeType] = useState('')
   const [popup, setPopup] = useState<Popup | null>(null)
+
+  // STOCK HISTORY
+  const [historyProduct, setHistoryProduct] = useState<Product | null>(null)
+  const [historyRows, setHistoryRows] = useState<StockHistoryRow[]>([])
+  const [historyBusy, setHistoryBusy] = useState(false)
 
   // PRODUCT LIST CONTROLS
   const [productSearch, setProductSearch] = useState('')
@@ -260,6 +286,29 @@ export default function AdminPage() {
       setCategories((c.data as Category[]) ?? [])
       setProducts((p.data as Product[]) ?? [])
 
+      const loadedProducts = (p.data as Product[]) ?? []
+      if (loadedProducts.length > 0) {
+        const { data: imageRows, error: imageRowsError } = await supabase
+          .from('product_images')
+          .select('product_id, public_url, sort_order')
+          .in('product_id', loadedProducts.map(item => item.id))
+          .order('sort_order', { ascending: true })
+
+        if (imageRowsError) {
+          showPopup('error', 'Product Photos Load Failed', errorText(imageRowsError))
+        } else {
+          const thumbnails: Record<string, string> = {}
+          for (const row of imageRows ?? []) {
+            if (row.public_url && !thumbnails[String(row.product_id)]) {
+              thumbnails[String(row.product_id)] = row.public_url
+            }
+          }
+          setProductThumbnails(thumbnails)
+        }
+      } else {
+        setProductThumbnails({})
+      }
+
       if (r.data) {
         setRates({
           gold_24k:
@@ -324,8 +373,8 @@ export default function AdminPage() {
 
       const matchesStatus =
         productStatusFilter === 'all' ||
-        (productStatusFilter === 'available' && p.is_available) ||
-        (productStatusFilter === 'unavailable' && !p.is_available) ||
+        (productStatusFilter === 'available' && p.is_available && num(p.stock_quantity) > 0) ||
+        (productStatusFilter === 'out_of_stock' && (!p.is_available || num(p.stock_quantity) <= 0)) ||
         (productStatusFilter === 'featured' && p.is_featured)
 
       return matchesSearch && matchesCategory && matchesStatus
@@ -503,6 +552,8 @@ export default function AdminPage() {
     [pricing.other_charges]
   )
 
+  const directPiecePrice = num(product.price)
+
   const subtotal =
     metalValue +
     wastage +
@@ -588,12 +639,74 @@ export default function AdminPage() {
     )
   }
 
+  async function deleteExistingProductImage(image: ExistingProductImage) {
+    if (
+      !confirm(
+        'Delete this saved photo?\\n\\nThis photo will be permanently removed from the product.'
+      )
+    ) {
+      return
+    }
+
+    setBusy(true)
+
+    try {
+      if (image.storage_path) {
+        const storageDelete = await supabase.storage
+          .from(BUCKET)
+          .remove([image.storage_path])
+
+        if (storageDelete.error) {
+          showPopup(
+            'error',
+            'Photo Delete Failed',
+            errorText(storageDelete.error)
+          )
+          return
+        }
+      }
+
+      const { error } = await supabase
+        .from('product_images')
+        .delete()
+        .eq('id', image.id)
+
+      if (error) {
+        showPopup(
+          'error',
+          'Photo Delete Failed',
+          errorText(error)
+        )
+        return
+      }
+
+      setExistingProductImages(prev =>
+        prev.filter(item => item.id !== image.id)
+      )
+
+      showPopup(
+        'success',
+        'Photo Deleted',
+        'The selected product photo was deleted successfully.'
+      )
+    } catch (error) {
+      showPopup(
+        'error',
+        'Photo Delete Error',
+        errorText(error)
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
   function resetProduct() {
     setProduct(emptyProduct)
     setPricing(emptyPricing)
     setSlugManuallyEdited(false)
     setAutoSlug(true)
     setImageFiles([])
+    setExistingProductImages([])
 
     imagePreviews.forEach(preview =>
       URL.revokeObjectURL(preview)
@@ -746,10 +859,10 @@ export default function AdminPage() {
 
   async function saveSettings(
     e: FormEvent
-  ): Promise<boolean> {
+  ) {
     e.preventDefault()
 
-    if (!settings) return false
+    if (!settings) return
 
     setBusy(true)
 
@@ -777,7 +890,7 @@ export default function AdminPage() {
           'Shop Details Not Saved',
           errorText(error)
         )
-        return false
+        return
       }
 
       showPopup(
@@ -787,14 +900,12 @@ export default function AdminPage() {
       )
 
       router.refresh()
-      return true
     } catch (error) {
       showPopup(
         'error',
         'Shop Details Error',
         errorText(error)
       )
-      return false
     } finally {
       setBusy(false)
     }
@@ -859,6 +970,8 @@ export default function AdminPage() {
 
   function pricingPayload() {
     return {
+      pricing_mode: pricing.pricing_mode,
+
       gross_weight:
         pricing.gross_weight,
 
@@ -939,13 +1052,44 @@ export default function AdminPage() {
     setBusy(true)
 
     try {
+      const baseSlug = (
+        product.slug.trim() ||
+        slugify(product.name)
+      ).trim()
+
+      // Always make the slug unique before saving.
+      // If the base slug already belongs to another product, use
+      // -2, -3, -4, ... until an unused slug is found.
+      let uniqueSlug = baseSlug
+      let suffix = 2
+
+      while (uniqueSlug) {
+        const slugCheck = await supabase
+          .from('products')
+          .select('id')
+          .eq('slug', uniqueSlug)
+          .neq('id', product.id || '00000000-0000-0000-0000-000000000000')
+          .maybeSingle()
+
+        if (slugCheck.error) {
+          showPopup(
+            'error',
+            'Slug Check Failed',
+            errorText(slugCheck.error)
+          )
+          return
+        }
+
+        if (!slugCheck.data) break
+
+        uniqueSlug = `${baseSlug}-${suffix}`
+        suffix += 1
+      }
+
       const payload = {
         name: product.name.trim(),
 
-        slug: (
-          product.slug.trim() ||
-          slugify(product.name)
-        ).trim(),
+        slug: uniqueSlug,
 
         sku:
           product.sku.trim() || null,
@@ -959,7 +1103,10 @@ export default function AdminPage() {
         weight:
           pricing.gross_weight.trim() || null,
 
-        price: null,
+        price:
+          pricing.pricing_mode === 'piece'
+            ? num(product.price) || null
+            : null,
 
         purity:
           product.purity.trim() || null,
@@ -968,10 +1115,15 @@ export default function AdminPage() {
           product.description.trim() || null,
 
         is_available:
-          product.is_available,
+          product.is_available && num(product.stock_quantity) > 0,
 
         is_featured:
           product.is_featured,
+
+        stock_quantity: Math.max(
+          0,
+          Math.floor(num(product.stock_quantity))
+        ),
 
         gross_weight:
           grossWeight || null,
@@ -1008,40 +1160,6 @@ export default function AdminPage() {
 
         updated_at:
           new Date().toISOString(),
-      }
-
-      const duplicateQuery =
-        product.id
-          ? await supabase
-              .from('products')
-              .select('id')
-              .eq('slug', payload.slug)
-              .neq('id', product.id)
-              .maybeSingle()
-          : await supabase
-              .from('products')
-              .select('id')
-              .eq('slug', payload.slug)
-              .maybeSingle()
-
-      if (duplicateQuery.error) {
-        showPopup(
-          'error',
-          'Slug Check Failed',
-          errorText(
-            duplicateQuery.error
-          )
-        )
-        return
-      }
-
-      if (duplicateQuery.data) {
-        showPopup(
-          'warning',
-          'Duplicate Slug',
-          'This slug is already used by another product.\n\nPlease edit the slug and try again.'
-        )
-        return
       }
 
       const result = product.id
@@ -1216,8 +1334,11 @@ export default function AdminPage() {
         }
       ).pricing_details
 
-    setSlugManuallyEdited(true)
-    setAutoSlug(false)
+    // Editing an existing product should keep the slug automatic by default.
+    // If the product name is changed, the slug will follow the new name.
+    // The slug field itself can still be edited manually at any time.
+    setSlugManuallyEdited(false)
+    setAutoSlug(true)
 
     // New selected images reset
     imagePreviews.forEach(preview =>
@@ -1226,6 +1347,45 @@ export default function AdminPage() {
 
     setImageFiles([])
     setImagePreviews([])
+
+    const { data: savedImages, error: savedImagesError } = await supabase
+      .from('product_images')
+      .select('id, storage_path, public_url, sort_order')
+      .eq('product_id', p.id)
+      .order('sort_order', { ascending: true })
+
+    if (savedImagesError) {
+      setExistingProductImages([])
+      showPopup(
+        'warning',
+        'Product Photos Load Failed',
+        errorText(savedImagesError)
+      )
+    } else {
+      setExistingProductImages(
+        (savedImages as ExistingProductImage[]) ?? []
+      )
+    }
+
+    const existingNetWeight = raw
+      ? num(raw.net_weight)
+      : num((p as Product & { net_weight?: number }).net_weight)
+
+    const inferredPiecePrice =
+      num(p.price) > 0
+        ? num(p.price)
+        : existingNetWeight <= 0
+          ? num(p.rate)
+          : 0
+
+    const inferredPricingMode =
+      raw?.pricing_mode === 'piece'
+        ? 'piece'
+        : raw?.pricing_mode === 'metal_rate'
+          ? 'metal_rate'
+          : inferredPiecePrice > 0 && existingNetWeight <= 0
+            ? 'piece'
+            : 'metal_rate'
 
     setProduct({
       ...emptyProduct,
@@ -1251,9 +1411,9 @@ export default function AdminPage() {
         p.weight ?? '',
 
       price:
-        p.price == null
-          ? ''
-          : String(p.price),
+        inferredPiecePrice > 0
+          ? String(inferredPiecePrice)
+          : '',
 
       purity:
         p.purity ?? '',
@@ -1266,12 +1426,17 @@ export default function AdminPage() {
 
       is_featured:
         p.is_featured,
+
+      stock_quantity:
+        String(Math.max(0, Math.floor(num((p as Product).stock_quantity)))),
     })
 
     if (raw) {
       setPricing({
         ...emptyPricing,
         ...raw,
+        pricing_mode: inferredPricingMode,
+
 
         stones:
           Array.isArray(raw.stones)
@@ -1295,6 +1460,7 @@ export default function AdminPage() {
 
       setPricing({
         ...emptyPricing,
+        pricing_mode: inferredPricingMode,
 
         gross_weight:
           extended.gross_weight
@@ -1324,6 +1490,311 @@ export default function AdminPage() {
 
       behavior: 'smooth',
     })
+  }
+
+  async function logStockChange(
+    productId: string,
+    previousStock: number,
+    newStock: number,
+    changeType: StockHistoryRow['change_type'],
+    note: string
+  ) {
+    const quantityChange = newStock - previousStock
+
+    // The existing Supabase stock_history table uses:
+    // action + quantity_change + quantity_after.
+    // Keep the current History UI unchanged by mapping to that schema here.
+    const action =
+      changeType === 'sold'
+        ? 'sale'
+        : changeType === 'set'
+          ? 'edit'
+          : changeType
+
+    const { error } = await supabase
+      .from('stock_history')
+      .insert({
+        product_id: productId,
+        action,
+        quantity_change: quantityChange,
+        quantity_after: newStock,
+        note,
+      })
+
+    if (error) {
+      showPopup(
+        'warning',
+        'Stock Updated, History Not Saved',
+        `Stock was updated successfully, but the history entry could not be saved.\n\n${errorText(error)}`
+      )
+      return false
+    }
+
+    return true
+  }
+
+  async function addOnePiece(p: Product) {
+    const currentStock = Math.max(
+      0,
+      Math.floor(num(p.stock_quantity))
+    )
+    const nextStock = currentStock + 1
+
+    setBusy(true)
+
+    try {
+      const { error } = await supabase
+        .from('products')
+        .update({
+          stock_quantity: nextStock,
+          is_available: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', p.id)
+
+      if (error) {
+        showPopup(
+          'error',
+          'Stock Update Failed',
+          errorText(error)
+        )
+        return
+      }
+
+      await logStockChange(
+        String(p.id),
+        currentStock,
+        nextStock,
+        'add',
+        '+1 PC added from Admin Product List.'
+      )
+
+      await load()
+
+      showPopup(
+        'success',
+        'Stock Increased',
+        `"${p.name}" now has ${nextStock} PCS available.`
+      )
+    } catch (error) {
+      showPopup(
+        'error',
+        'Stock Update Failed',
+        errorText(error)
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function removeOnePiece(p: Product) {
+    const currentStock = Math.max(
+      0,
+      Math.floor(num(p.stock_quantity))
+    )
+
+    if (currentStock <= 0) {
+      showPopup(
+        'warning',
+        'Already Out of Stock',
+        'This product already has 0 PCS available.'
+      )
+      return
+    }
+
+    const nextStock = currentStock - 1
+
+    if (!confirm(`Remove 1 PC from "${p.name}"?\n\nStock will change from ${currentStock} PCS to ${nextStock} PCS.`)) {
+      return
+    }
+
+    setBusy(true)
+
+    try {
+      const { error } = await supabase
+        .from('products')
+        .update({
+          stock_quantity: nextStock,
+          is_available: nextStock > 0,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', p.id)
+
+      if (error) {
+        showPopup(
+          'error',
+          'Stock Update Failed',
+          errorText(error)
+        )
+        return
+      }
+
+      await logStockChange(
+        String(p.id),
+        currentStock,
+        nextStock,
+        'remove',
+        '-1 PC removed from Admin Product List.'
+      )
+
+      await load()
+
+      showPopup(
+        'success',
+        'Stock Decreased',
+        `"${p.name}" now has ${nextStock} PCS available.`
+      )
+    } catch (error) {
+      showPopup(
+        'error',
+        'Stock Update Failed',
+        errorText(error)
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function showStockHistory(p: Product) {
+    setHistoryProduct(p)
+    setHistoryRows([])
+    setHistoryBusy(true)
+
+    try {
+      const { data, error } = await supabase
+        .from('stock_history')
+        .select('id, product_id, action, quantity_change, quantity_after, note, created_at')
+        .eq('product_id', p.id)
+        .order('created_at', { ascending: false })
+        .limit(100)
+
+      if (error) {
+        showPopup(
+          'error',
+          'History Load Failed',
+          errorText(error)
+        )
+        setHistoryProduct(null)
+        return
+      }
+
+      // Convert the existing database schema into the format used by
+      // the current History UI. No new database columns are required.
+      const rows = ((data ?? []) as Array<{
+        id: string | number
+        product_id: string
+        action: string
+        quantity_change: number
+        quantity_after: number
+        note: string | null
+        created_at: string
+      }>).map(row => {
+        const changeType: StockHistoryRow['change_type'] =
+          row.action === 'sale'
+            ? 'sold'
+            : row.action === 'add'
+              ? 'add'
+              : row.action === 'remove'
+                ? 'remove'
+                : 'set'
+
+        const quantityChange = Number(row.quantity_change ?? 0)
+        const newStock = Number(row.quantity_after ?? 0)
+        const previousStock = newStock - quantityChange
+
+        return {
+          id: row.id,
+          product_id: String(row.product_id),
+          change_type: changeType,
+          previous_stock: previousStock,
+          new_stock: newStock,
+          quantity_change: quantityChange,
+          note: row.note ?? null,
+          created_at: row.created_at,
+        }
+      })
+
+      setHistoryRows(rows)
+    } catch (error) {
+      showPopup(
+        'error',
+        'History Load Failed',
+        errorText(error)
+      )
+      setHistoryProduct(null)
+    } finally {
+      setHistoryBusy(false)
+    }
+  }
+
+  async function markOneSold(p: Product) {
+    const currentStock = Math.max(
+      0,
+      Math.floor(num(p.stock_quantity))
+    )
+
+    if (currentStock <= 0) {
+      showPopup(
+        'warning',
+        'Already Out of Stock',
+        'This product already has 0 PCS available.'
+      )
+      return
+    }
+
+    if (!confirm(`Mark 1 PCS of "${p.name}" as sold?\n\nStock will change from ${currentStock} PCS to ${currentStock - 1} PCS.`)) {
+      return
+    }
+
+    setBusy(true)
+
+    try {
+      const nextStock = currentStock - 1
+
+      const { error } = await supabase
+        .from('products')
+        .update({
+          stock_quantity: nextStock,
+          is_available: nextStock > 0,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', p.id)
+
+      if (error) {
+        showPopup(
+          'error',
+          'Stock Update Failed',
+          errorText(error)
+        )
+        return
+      }
+
+      await logStockChange(
+        String(p.id),
+        currentStock,
+        nextStock,
+        'sold',
+        '1 PC marked as sold from Admin Product List.'
+      )
+
+      await load()
+
+      showPopup(
+        'success',
+        nextStock > 0 ? 'Stock Updated' : 'Product Sold Out',
+        nextStock > 0
+          ? `"${p.name}" now has ${nextStock} PCS available.`
+          : `"${p.name}" is now Out of Stock.`
+      )
+    } catch (error) {
+      showPopup(
+        'error',
+        'Stock Update Failed',
+        errorText(error)
+      )
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function removeProduct(
@@ -1600,6 +2071,93 @@ export default function AdminPage() {
 
   return (
     <>
+      {historyProduct && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl rounded-2xl border border-border bg-background p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-gold">
+                  Stock History
+                </p>
+                <h3 className="mt-1 text-xl font-semibold text-primary">
+                  {historyProduct.name}
+                </h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Current stock: {num(historyProduct.stock_quantity)} PCS
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setHistoryProduct(null)}
+                className="rounded-md border px-3 py-1.5 text-sm hover:bg-secondary"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-5 max-h-[60vh] overflow-y-auto rounded-xl border">
+              {historyBusy ? (
+                <div className="p-6 text-center text-sm text-muted-foreground">
+                  Loading history…
+                </div>
+              ) : historyRows.length === 0 ? (
+                <div className="p-6 text-center">
+                  <p className="font-medium">No stock history yet</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Future +1 PC, -1 PC and sold changes will appear here.
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y">
+                  {historyRows.map(row => (
+                    <div
+                      key={row.id}
+                      className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div>
+                        <p className="font-medium">
+                          {row.change_type === 'add'
+                            ? '+1 PC Added'
+                            : row.change_type === 'remove'
+                              ? '-1 PC Removed'
+                              : row.change_type === 'sold'
+                                ? '1 PC Sold'
+                                : 'Stock Updated'}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {row.note || 'Stock change'}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {new Date(row.created_at).toLocaleString('en-IN')}
+                        </p>
+                      </div>
+
+                      <div className="text-left sm:text-right">
+                        <p className="text-sm font-medium">
+                          {row.previous_stock} PCS → {row.new_stock} PCS
+                        </p>
+                        <p className={cn(
+                          'text-xs font-medium',
+                          row.quantity_change > 0
+                            ? 'text-green-600'
+                            : row.quantity_change < 0
+                              ? 'text-red-600'
+                              : 'text-muted-foreground'
+                        )}>
+                          {row.quantity_change > 0 ? '+' : ''}
+                          {row.quantity_change} PCS
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {popup && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl">
@@ -1694,164 +2252,79 @@ export default function AdminPage() {
 
               <button
                 type="button"
-                onClick={() => {
-                  setShowShopDetails((value) => !value)
-                  setEditingShopDetails(false)
-                }}
+                onClick={() => setShowShopDetails(value => !value)}
                 className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium transition hover:bg-secondary"
               >
                 {showShopDetails ? 'Hide Shop Details' : 'View Shop Details'}
               </button>
             </div>
 
-            {showShopDetails && settings && !editingShopDetails && (
-              <div className="mt-5 rounded-xl border border-border bg-secondary/20 p-4">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Shop Name
-                    </p>
-                    <p className="mt-1 text-sm font-medium">
-                      {settings.shop_name || '—'}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Mobile Number
-                    </p>
-                    <p className="mt-1 text-sm font-medium">
-                      {settings.phone || '—'}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      WhatsApp Number
-                    </p>
-                    <p className="mt-1 text-sm font-medium">
-                      {settings.whatsapp_number || '—'}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Address
-                    </p>
-                    <p className="mt-1 text-sm font-medium">
-                      {settings.address || '—'}
-                    </p>
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Google Maps URL
-                    </p>
-                    <p className="mt-1 break-all text-sm font-medium">
-                      {settings.google_maps_url || '—'}
-                    </p>
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      About
-                    </p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm leading-6">
-                      {settings.about || '—'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-5 border-t border-border pt-4">
-                  <button
-                    type="button"
-                    onClick={() => setEditingShopDetails(true)}
-                    className="rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground"
-                  >
-                    Edit Shop Details
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {showShopDetails && settings && editingShopDetails && (
+            {showShopDetails && (
               <form
-                onSubmit={async (event) => {
-                  const saved = await saveSettings(event)
-                  if (saved) {
-                    setEditingShopDetails(false)
-                  }
-                }}
-                className="mt-5 rounded-xl border border-border bg-secondary/20 p-4"
+                onSubmit={saveSettings}
+                className="mt-5 grid gap-4 md:grid-cols-2"
               >
-                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
-                  You are editing shop information. Changes will affect the information shown across the website.
-                </div>
+                {settings && (
+                  <>
+                    {([
+                      ['shop_name', 'Shop name'],
+                      ['phone', 'Mobile number'],
+                      ['whatsapp_number', 'WhatsApp number'],
+                      ['address', 'Address'],
+                      ['google_maps_url', 'Google Maps URL'],
+                    ] as const).map(
+                      ([key, label]) => (
+                        <label
+                          key={key}
+                          className="text-sm font-medium"
+                        >
+                          {label}
 
-                <div className="grid gap-4 md:grid-cols-2">
-                  {([
-                    ['shop_name', 'Shop name'],
-                    ['phone', 'Mobile number'],
-                    ['whatsapp_number', 'WhatsApp number'],
-                    ['address', 'Address'],
-                    ['google_maps_url', 'Google Maps URL'],
-                  ] as const).map(([key, label]) => (
-                    <label
-                      key={key}
-                      className="text-sm font-medium"
-                    >
-                      {label}
+                          <input
+                            className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2"
+                            value={
+                              (settings as any)[key] ??
+                              ''
+                            }
+                            onChange={e =>
+                              setSettings({
+                                ...settings,
+                                [key]:
+                                  e.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                      )
+                    )}
 
-                      <input
-                        className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2"
-                        value={(settings as any)[key] ?? ''}
-                        onChange={(e) =>
+                    <label className="text-sm font-medium md:col-span-2">
+                      About
+
+                      <textarea
+                        className="mt-1 min-h-24 w-full rounded-md border border-border bg-background px-3 py-2"
+                        value={
+                          settings.about ?? ''
+                        }
+                        onChange={e =>
                           setSettings({
                             ...settings,
-                            [key]: e.target.value,
+                            about:
+                              e.target.value,
                           })
                         }
                       />
                     </label>
-                  ))}
+                  </>
+                )}
 
-                  <label className="text-sm font-medium md:col-span-2">
-                    About
-
-                    <textarea
-                      className="mt-1 min-h-24 w-full rounded-md border border-border bg-background px-3 py-2"
-                      value={settings.about ?? ''}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          about: e.target.value,
-                        })
-                      }
-                    />
-                  </label>
-                </div>
-
-                <div className="mt-5 flex flex-wrap gap-2">
-                  <button
-                    type="submit"
-                    disabled={busy}
-                    className="rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-60"
-                  >
-                    {busy ? 'Saving...' : 'Save Shop Details'}
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => {
-                      setEditingShopDetails(false)
-                      load()
-                    }}
-                    className="rounded-md border border-border bg-background px-4 py-2.5 text-sm font-medium disabled:opacity-60"
-                  >
-                    Cancel
-                  </button>
-                </div>
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground md:w-fit"
+                >
+                  Save shop details
+                </button>
               </form>
             )}
           </section>
@@ -2145,34 +2618,82 @@ export default function AdminPage() {
                 <label className="text-sm font-medium">
                   Category
 
-                  <select
-                    className="mt-1 w-full rounded-md border px-3 py-2"
-                    value={
-                      product.category_id
-                    }
-                    onChange={e =>
-                      setProduct({
-                        ...product,
-                        category_id:
-                          e.target.value,
-                      })
-                    }
-                  >
-                    <option value="">
-                      Select category
-                    </option>
+                  <div className="relative mt-1">
+                    <button
+                      type="button"
+                      className="w-full rounded-md border px-3 py-2 text-left font-normal"
+                      onClick={() => {
+                        setCategoryDropdownOpen(prev => !prev)
+                        setCategorySearch('')
+                      }}
+                    >
+                      {categories.find(c => c.id === product.category_id)?.name || 'Select category'}
+                    </button>
 
-                    {categories.map(
-                      c => (
-                        <option
-                          key={c.id}
-                          value={c.id}
-                        >
-                          {c.name}
-                        </option>
-                      )
+                    {categoryDropdownOpen && (
+                      <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-md border bg-background p-2 shadow-lg">
+                        <input
+                          autoFocus
+                          type="text"
+                          value={categorySearch}
+                          onChange={e => setCategorySearch(e.target.value)}
+                          placeholder="Search category..."
+                          className="w-full rounded-md border px-3 py-2 text-sm font-normal"
+                        />
+
+                        <div className="mt-2 max-h-60 overflow-y-auto">
+                          <button
+                            type="button"
+                            className="w-full rounded-md px-3 py-2 text-left text-sm font-normal hover:bg-secondary"
+                            onClick={() => {
+                              setProduct({
+                                ...product,
+                                category_id: '',
+                              })
+                              setCategoryDropdownOpen(false)
+                              setCategorySearch('')
+                            }}
+                          >
+                            Select category
+                          </button>
+
+                          {categories
+                            .filter(c =>
+                              c.name
+                                .toLowerCase()
+                                .includes(categorySearch.trim().toLowerCase())
+                            )
+                            .map(c => (
+                              <button
+                                key={c.id}
+                                type="button"
+                                className="w-full rounded-md px-3 py-2 text-left text-sm font-normal hover:bg-secondary"
+                                onClick={() => {
+                                  setProduct({
+                                    ...product,
+                                    category_id: c.id,
+                                  })
+                                  setCategoryDropdownOpen(false)
+                                  setCategorySearch('')
+                                }}
+                              >
+                                {c.name}
+                              </button>
+                            ))}
+
+                          {categories.filter(c =>
+                            c.name
+                              .toLowerCase()
+                              .includes(categorySearch.trim().toLowerCase())
+                          ).length === 0 && (
+                            <p className="px-3 py-2 text-sm font-normal text-muted-foreground">
+                              No category found.
+                            </p>
+                          )}
+                        </div>
+                      </div>
                     )}
-                  </select>
+                  </div>
                 </label>
 
                 <label className="text-sm font-medium">
@@ -2282,6 +2803,97 @@ export default function AdminPage() {
                   </div>
                 </label>
               </div>
+
+              {/* PRICING MODE */}
+
+              <section className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-gold">
+                    Product Pricing
+                  </p>
+                  <h3 className="font-serif text-xl font-semibold text-primary">
+                    How should this product price be shown?
+                  </h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Choose Direct Piece Price for products with a fixed selling price. Choose Metal Rate Based for products whose price changes with the daily gold/silver rate.
+                  </p>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <label className={cn(
+                    'cursor-pointer rounded-xl border p-4 transition-colors',
+                    pricing.pricing_mode === 'metal_rate'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border bg-background'
+                  )}>
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="radio"
+                        name="pricing_mode"
+                        value="metal_rate"
+                        checked={pricing.pricing_mode === 'metal_rate'}
+                        onChange={() => updatePricing('pricing_mode', 'metal_rate')}
+                        className="mt-1"
+                      />
+                      <div>
+                        <p className="font-semibold">Metal Rate Based</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Price is calculated from metal rate, weight, making, stones, other charges and GST.
+                        </p>
+                      </div>
+                    </div>
+                  </label>
+
+                  <label className={cn(
+                    'cursor-pointer rounded-xl border p-4 transition-colors',
+                    pricing.pricing_mode === 'piece'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border bg-background'
+                  )}>
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="radio"
+                        name="pricing_mode"
+                        value="piece"
+                        checked={pricing.pricing_mode === 'piece'}
+                        onChange={() => updatePricing('pricing_mode', 'piece')}
+                        className="mt-1"
+                      />
+                      <div>
+                        <p className="font-semibold">Direct Piece Price</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          This fixed price will show to customers whether today's metal rate is filled or blank.
+                        </p>
+                      </div>
+                    </div>
+                  </label>
+                </div>
+
+                {pricing.pricing_mode === 'piece' && (
+                  <div className="mt-4 rounded-xl border border-border bg-background p-4">
+                    <label className="text-sm font-medium">
+                      Direct Piece Price (₹)
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-lg font-semibold"
+                        value={product.price}
+                        onChange={e =>
+                          setProduct(prev => ({
+                            ...prev,
+                            price: e.target.value,
+                          }))
+                        }
+                        placeholder="e.g. 5000"
+                      />
+                    </label>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Customer site par ye price directly show hogi. Daily metal rate ka is price par koi effect nahi hoga.
+                    </p>
+                  </div>
+                )}
+              </section>
 
               {/* WEIGHT DETAILS */}
 
@@ -3235,7 +3847,48 @@ export default function AdminPage() {
                   Select multiple JPG, PNG, WebP or AVIF images. Maximum 8 MB per image.
                 </p>
 
-                {/* IMAGE PREVIEWS */}
+                {/* EXISTING SAVED PHOTOS */}
+
+                {existingProductImages.length > 0 && (
+                  <div className="mt-4">
+                    <p className="mb-2 text-xs font-medium text-muted-foreground">
+                      Existing Photos
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                      {existingProductImages.map((image, index) => (
+                        <div
+                          key={image.id}
+                          className="relative overflow-hidden rounded-xl border bg-secondary"
+                        >
+                          <img
+                            src={image.public_url}
+                            alt={`${product.name || 'Product'} photo ${index + 1}`}
+                            className="aspect-square w-full object-cover"
+                          />
+
+                          <div className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-1 text-xs text-white">
+                            Saved {index + 1}
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() =>
+                              deleteExistingProductImage(image)
+                            }
+                            className="absolute right-2 top-2 rounded-full bg-red-600/90 px-2.5 py-1.5 text-xs font-medium text-white shadow hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            title="Delete photo"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* NEW IMAGE PREVIEWS */}
 
                 {imagePreviews.length >
                   0 && (
@@ -3283,6 +3936,43 @@ export default function AdminPage() {
                 )}
 
               </div>
+
+              {/* STOCK / AVAILABLE / FEATURED */}
+
+              <section className="rounded-xl border p-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="text-sm font-medium">
+                    Available Pieces (PCS)
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      className="mt-1 w-full rounded-md border px-3 py-2"
+                      value={product.stock_quantity}
+                      onChange={e => {
+                        const value = Math.max(0, Math.floor(num(e.target.value)))
+                        setProduct(prev => ({
+                          ...prev,
+                          stock_quantity: String(value),
+                          is_available: value > 0 ? prev.is_available : false,
+                        }))
+                      }}
+                    />
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      0 PCS automatically saves the product as Out of Stock.
+                    </span>
+                  </label>
+
+                  <div className="rounded-md border bg-secondary/30 px-3 py-2">
+                    <p className="text-xs text-muted-foreground">Current Stock Status</p>
+                    <p className="mt-1 font-semibold">
+                      {num(product.stock_quantity) > 0 && product.is_available
+                        ? `Available · ${num(product.stock_quantity)} PCS`
+                        : 'Out of Stock'}
+                    </p>
+                  </div>
+                </div>
+              </section>
 
               {/* AVAILABLE / FEATURED */}
 
@@ -3417,7 +4107,7 @@ export default function AdminPage() {
                 >
                   <option value="all">All products</option>
                   <option value="available">Available</option>
-                  <option value="unavailable">Unavailable</option>
+                  <option value="out_of_stock">Out of Stock</option>
                   <option value="featured">Featured</option>
                 </select>
               </label>
@@ -3486,38 +4176,98 @@ export default function AdminPage() {
                     key={p.id}
                     className="flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
                   >
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-medium">
-                          {p.name}
-                        </p>
-                        {p.is_featured && (
-                          <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[11px] font-medium text-yellow-800">
-                            Featured
-                          </span>
+                    <div className="flex min-w-0 items-center gap-4">
+                      <div className="relative size-20 shrink-0 overflow-hidden rounded-lg border bg-secondary">
+                        {productThumbnails[String(p.id)] ? (
+                          <img
+                            src={productThumbnails[String(p.id)]}
+                            alt={p.name}
+                            className="h-full w-full object-contain"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                            No photo
+                          </div>
                         )}
-                        <span className={cn(
-                          'rounded-full px-2 py-0.5 text-[11px] font-medium',
-                          p.is_available
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-red-100 text-red-800'
-                        )}>
-                          {p.is_available ? 'Available' : 'Unavailable'}
-                        </span>
                       </div>
 
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {p.sku || 'No SKU'} · {p.purity || 'Purity not set'} · {p.weight ? `${p.weight} GM` : 'Weight not set'}
-                      </p>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium">{p.name}</p>
+                          {p.is_featured && (
+                            <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[11px] font-medium text-yellow-800">
+                              Featured
+                            </span>
+                          )}
+                          <span className={cn(
+                            'rounded-full px-2 py-0.5 text-[11px] font-medium',
+                            p.is_available && num(p.stock_quantity) > 0
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-red-100 text-red-800'
+                          )}>
+                            {p.is_available && num(p.stock_quantity) > 0
+                              ? `Available · ${num(p.stock_quantity)} PCS`
+                              : 'Out of Stock'}
+                          </span>
+                        </div>
 
-                      <p className="mt-1 text-sm font-medium">
-                        {p.price != null && num(p.price) > 0
-                          ? money(num(p.price))
-                          : 'Price on request'}
-                      </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {p.sku || 'No SKU'} · {p.purity || 'Purity not set'} · {p.weight ? `${p.weight} GM` : 'Weight not set'}
+                        </p>
+
+                        <p className="mt-1 text-sm font-medium">
+                          {num(p.price) > 0
+                            ? money(num(p.price))
+                            : num(p.rate) > 0 && !num(p.weight)
+                              ? money(num(p.rate))
+                              : 'Price on request'}
+                        </p>
+                      </div>
                     </div>
 
-                    <div className="flex shrink-0 gap-2">
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => showStockHistory(p)}
+                        className="rounded-md border border-blue-200 px-3 py-1.5 text-sm text-blue-800 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        History
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => addOnePiece(p)}
+                        className="rounded-md border border-green-200 px-3 py-1.5 text-sm text-green-800 hover:bg-green-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        +1 PC
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={
+                          busy ||
+                          num(p.stock_quantity) <= 0
+                        }
+                        onClick={() => removeOnePiece(p)}
+                        className="rounded-md border border-orange-200 px-3 py-1.5 text-sm text-orange-800 hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        -1 PC
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={
+                          busy ||
+                          num(p.stock_quantity) <= 0
+                        }
+                        onClick={() => markOneSold(p)}
+                        className="rounded-md border border-amber-200 px-3 py-1.5 text-sm text-amber-800 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Mark 1 Sold
+                      </button>
+
                       <button
                         type="button"
                         onClick={() => editProduct(p)}
