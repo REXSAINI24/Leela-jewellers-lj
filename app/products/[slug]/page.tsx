@@ -845,7 +845,31 @@ export default async function ProductDetailPage({
                         </div>
                       )}
 
-                      <div className="my-2 border-t border-border/70" />
+                                             {stoneCharges > 0 && (
+                         <div className="flex justify-between gap-4">
+                           <span className="text-muted-foreground">
+                             Stone Charges
+                           </span>
+
+                           <span className="font-medium">
+                             {money(stoneCharges)}
+                           </span>
+                         </div>
+                       )}
+
+                       {otherCharges > 0 && (
+                         <div className="flex justify-between gap-4">
+                           <span className="text-muted-foreground">
+                             Other Charges
+                           </span>
+
+                           <span className="font-medium">
+                             {money(otherCharges)}
+                           </span>
+                         </div>
+                       )}
+
+<div className="my-2 border-t border-border/70" />
 
                       <div className="flex justify-between gap-4">
                         <span className="font-medium">
