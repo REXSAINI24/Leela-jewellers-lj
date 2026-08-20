@@ -122,6 +122,7 @@ export default function AdminPage() {
   const [ready, setReady] = useState(false)
   const [authorized, setAuthorized] = useState(false)
   const [settings, setSettings] = useState<ShopSettings | null>(null)
+  const [showShopDetails, setShowShopDetails] = useState(false)
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [productThumbnails, setProductThumbnails] = useState<Record<string, string>>({})
@@ -2130,75 +2131,93 @@ export default function AdminPage() {
           {/* SHOP DETAILS */}
 
           <section className="mb-6 rounded-2xl border border-border bg-background p-5">
-            <h2 className="font-serif text-2xl font-semibold text-primary">
-              Shop Details
-            </h2>
-
-            <form
-              onSubmit={saveSettings}
-              className="mt-4 grid gap-4 md:grid-cols-2"
-            >
-              {settings && (
-                <>
-                  {([
-                    ['shop_name', 'Shop name'],
-                    ['phone', 'Mobile number'],
-                    ['whatsapp_number', 'WhatsApp number'],
-                    ['address', 'Address'],
-                    ['google_maps_url', 'Google Maps URL'],
-                  ] as const).map(
-                    ([key, label]) => (
-                      <label
-                        key={key}
-                        className="text-sm font-medium"
-                      >
-                        {label}
-
-                        <input
-                          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2"
-                          value={
-                            (settings as any)[key] ??
-                            ''
-                          }
-                          onChange={e =>
-                            setSettings({
-                              ...settings,
-                              [key]:
-                                e.target.value,
-                            })
-                          }
-                        />
-                      </label>
-                    )
-                  )}
-
-                  <label className="text-sm font-medium md:col-span-2">
-                    About
-
-                    <textarea
-                      className="mt-1 min-h-24 w-full rounded-md border border-border bg-background px-3 py-2"
-                      value={
-                        settings.about ?? ''
-                      }
-                      onChange={e =>
-                        setSettings({
-                          ...settings,
-                          about:
-                            e.target.value,
-                        })
-                      }
-                    />
-                  </label>
-                </>
-              )}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-gold">
+                  Store Information
+                </p>
+                <h2 className="font-serif text-2xl font-semibold text-primary">
+                  Shop Details
+                </h2>
+              </div>
 
               <button
-                disabled={busy}
-                className="rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground md:w-fit"
+                type="button"
+                onClick={() => setShowShopDetails(value => !value)}
+                className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium transition hover:bg-secondary"
               >
-                Save shop details
+                {showShopDetails ? 'Hide Shop Details' : 'View Shop Details'}
               </button>
-            </form>
+            </div>
+
+            {showShopDetails && (
+              <form
+                onSubmit={saveSettings}
+                className="mt-5 grid gap-4 md:grid-cols-2"
+              >
+                {settings && (
+                  <>
+                    {([
+                      ['shop_name', 'Shop name'],
+                      ['phone', 'Mobile number'],
+                      ['whatsapp_number', 'WhatsApp number'],
+                      ['address', 'Address'],
+                      ['google_maps_url', 'Google Maps URL'],
+                    ] as const).map(
+                      ([key, label]) => (
+                        <label
+                          key={key}
+                          className="text-sm font-medium"
+                        >
+                          {label}
+
+                          <input
+                            className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2"
+                            value={
+                              (settings as any)[key] ??
+                              ''
+                            }
+                            onChange={e =>
+                              setSettings({
+                                ...settings,
+                                [key]:
+                                  e.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                      )
+                    )}
+
+                    <label className="text-sm font-medium md:col-span-2">
+                      About
+
+                      <textarea
+                        className="mt-1 min-h-24 w-full rounded-md border border-border bg-background px-3 py-2"
+                        value={
+                          settings.about ?? ''
+                        }
+                        onChange={e =>
+                          setSettings({
+                            ...settings,
+                            about:
+                              e.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                  </>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="rounded-md bg-primary px-4 py-2.5 text-sm text-primary-foreground md:w-fit"
+                >
+                  Save shop details
+                </button>
+              </form>
+            )}
           </section>
 
           {/* METAL RATES */}
