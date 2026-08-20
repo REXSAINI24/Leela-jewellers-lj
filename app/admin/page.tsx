@@ -131,6 +131,8 @@ export default function AdminPage() {
   const [chargeTypes, setChargeTypes] = useState<string[]>([])
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false)
   const [autoSlug, setAutoSlug] = useState(true)
+  const [categorySearch, setCategorySearch] = useState('')
+  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false)
   const [rates, setRates] = useState({
     gold_24k: '',
     gold_22k: '',
@@ -2613,34 +2615,82 @@ export default function AdminPage() {
                 <label className="text-sm font-medium">
                   Category
 
-                  <select
-                    className="mt-1 w-full rounded-md border px-3 py-2"
-                    value={
-                      product.category_id
-                    }
-                    onChange={e =>
-                      setProduct({
-                        ...product,
-                        category_id:
-                          e.target.value,
-                      })
-                    }
-                  >
-                    <option value="">
-                      Select category
-                    </option>
+                  <div className="relative mt-1">
+                    <button
+                      type="button"
+                      className="w-full rounded-md border px-3 py-2 text-left font-normal"
+                      onClick={() => {
+                        setCategoryDropdownOpen(prev => !prev)
+                        setCategorySearch('')
+                      }}
+                    >
+                      {categories.find(c => c.id === product.category_id)?.name || 'Select category'}
+                    </button>
 
-                    {categories.map(
-                      c => (
-                        <option
-                          key={c.id}
-                          value={c.id}
-                        >
-                          {c.name}
-                        </option>
-                      )
+                    {categoryDropdownOpen && (
+                      <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-md border bg-background p-2 shadow-lg">
+                        <input
+                          autoFocus
+                          type="text"
+                          value={categorySearch}
+                          onChange={e => setCategorySearch(e.target.value)}
+                          placeholder="Search category..."
+                          className="w-full rounded-md border px-3 py-2 text-sm font-normal"
+                        />
+
+                        <div className="mt-2 max-h-60 overflow-y-auto">
+                          <button
+                            type="button"
+                            className="w-full rounded-md px-3 py-2 text-left text-sm font-normal hover:bg-secondary"
+                            onClick={() => {
+                              setProduct({
+                                ...product,
+                                category_id: '',
+                              })
+                              setCategoryDropdownOpen(false)
+                              setCategorySearch('')
+                            }}
+                          >
+                            Select category
+                          </button>
+
+                          {categories
+                            .filter(c =>
+                              c.name
+                                .toLowerCase()
+                                .includes(categorySearch.trim().toLowerCase())
+                            )
+                            .map(c => (
+                              <button
+                                key={c.id}
+                                type="button"
+                                className="w-full rounded-md px-3 py-2 text-left text-sm font-normal hover:bg-secondary"
+                                onClick={() => {
+                                  setProduct({
+                                    ...product,
+                                    category_id: c.id,
+                                  })
+                                  setCategoryDropdownOpen(false)
+                                  setCategorySearch('')
+                                }}
+                              >
+                                {c.name}
+                              </button>
+                            ))}
+
+                          {categories.filter(c =>
+                            c.name
+                              .toLowerCase()
+                              .includes(categorySearch.trim().toLowerCase())
+                          ).length === 0 && (
+                            <p className="px-3 py-2 text-sm font-normal text-muted-foreground">
+                              No category found.
+                            </p>
+                          )}
+                        </div>
+                      </div>
                     )}
-                  </select>
+                  </div>
                 </label>
 
                 <label className="text-sm font-medium">
