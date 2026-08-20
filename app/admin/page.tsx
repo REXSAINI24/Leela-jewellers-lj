@@ -55,7 +55,7 @@ type Popup = {
 }
 
 type StockHistoryRow = {
-  id: number
+  id: string | number
   product_id: string
   change_type: 'add' | 'remove' | 'sold' | 'set'
   previous_stock: number
@@ -1498,14 +1498,23 @@ export default function AdminPage() {
   ) {
     const quantityChange = newStock - previousStock
 
+    // The existing Supabase stock_history table uses:
+    // action + quantity_change + quantity_after.
+    // Keep the current History UI unchanged by mapping to that schema here.
+    const action =
+      changeType === 'sold'
+        ? 'sale'
+        : changeType === 'set'
+          ? 'edit'
+          : changeType
+
     const { error } = await supabase
       .from('stock_history')
       .insert({
         product_id: productId,
-        previous_stock: previousStock,
-        new_stock: newStock,
+        action,
         quantity_change: quantityChange,
-        change_type: changeType,
+        quantity_after: newStock,
         note,
       })
 
@@ -1651,7 +1660,7 @@ export default function AdminPage() {
     try {
       const { data, error } = await supabase
         .from('stock_history')
-        .select('id, product_id, change_type, previous_stock, new_stock, quantity_change, note, created_at')
+        .select('id, product_id, action, quantity_change, quantity_after, note, created_at')
         .eq('product_id', p.id)
         .order('created_at', { ascending: false })
         .limit(100)
@@ -1666,7 +1675,43 @@ export default function AdminPage() {
         return
       }
 
-      setHistoryRows((data as StockHistoryRow[]) ?? [])
+      // Convert the existing database schema into the format used by
+      // the current History UI. No new database columns are required.
+      const rows = ((data ?? []) as Array<{
+        id: string | number
+        product_id: string
+        action: string
+        quantity_change: number
+        quantity_after: number
+        note: string | null
+        created_at: string
+      }>).map(row => {
+        const changeType: StockHistoryRow['change_type'] =
+          row.action === 'sale'
+            ? 'sold'
+            : row.action === 'add'
+              ? 'add'
+              : row.action === 'remove'
+                ? 'remove'
+                : 'set'
+
+        const quantityChange = Number(row.quantity_change ?? 0)
+        const newStock = Number(row.quantity_after ?? 0)
+        const previousStock = newStock - quantityChange
+
+        return {
+          id: row.id,
+          product_id: String(row.product_id),
+          change_type: changeType,
+          previous_stock: previousStock,
+          new_stock: newStock,
+          quantity_change: quantityChange,
+          note: row.note ?? null,
+          created_at: row.created_at,
+        }
+      })
+
+      setHistoryRows(rows)
     } catch (error) {
       showPopup(
         'error',
