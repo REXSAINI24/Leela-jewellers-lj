@@ -1,29 +1,29 @@
-import type { MetadataRoute } from 'next'
+import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'LEELA JEWELLERS ADMIN',
-    short_name: 'LEELA ADMIN',
-    description: 'LEELA JEWELLERS owner dashboard and shop management app.',
-    start_url: '/admin',
-    scope: '/admin',
-    display: 'standalone',
-    orientation: 'portrait',
-    background_color: '#f7f3ea',
-    theme_color: '#c9a227',
+    name: "LEELA JEWELLERS",
+    short_name: "LEELA JEWELLERS",
+    description: "LEELA JEWELLERS – Gold & Silver Jewellery",
+    start_url: "/",
+    scope: "/",
+    display: "standalone",
+    orientation: "portrait",
+    background_color: "#f7f3ea",
+    theme_color: "#c9a227",
     icons: [
       {
-        src: '/admin-icon-192.png',
-        sizes: '192x192',
-        type: 'image/png',
-        purpose: 'any',
+        src: "/icon.svg",
+        sizes: "any",
+        type: "image/svg+xml",
+        purpose: "any",
       },
       {
-        src: '/admin-icon-512.png',
-        sizes: '512x512',
-        type: 'image/png',
-        purpose: 'any maskable',
+        src: "/apple-icon.png",
+        sizes: "180x180",
+        type: "image/png",
+        purpose: "any",
       },
     ],
-  }
+  };
 }
