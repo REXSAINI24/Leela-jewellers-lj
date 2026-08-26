@@ -7,6 +7,7 @@ import type { Category, Product, ShopSettings } from '@/lib/types'
 import { slugify } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { WebsiteAnalytics } from '@/components/website-analytics'
+import { PwaRegister } from './pwa-register'
 
 type StoneRow = {
   id: string
@@ -2071,6 +2072,7 @@ export default function AdminPage() {
 
   return (
     <>
+    <PwaRegister />
       {historyProduct && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-2xl rounded-2xl border border-border bg-background p-6 shadow-2xl">
